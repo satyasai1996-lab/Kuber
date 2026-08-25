@@ -1,6 +1,5 @@
-"""Kuber trading-intelligence backend."""
+"""Kuber: coordinated development-agent workflows."""
 
-from kuber.agents.coordinator import AnalysisCoordinator
-from kuber.market.intelligence import SharedMarketIntelligence
+from kuber.orchestration.workflow import DevelopmentWorkflow
 
-__all__ = ["AnalysisCoordinator", "SharedMarketIntelligence"]
+__all__ = ["DevelopmentWorkflow"]

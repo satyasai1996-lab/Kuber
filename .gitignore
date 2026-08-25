@@ -5,9 +5,3 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-
-# Loacal development environment 
-work/kuber-venv/
-work/publish/
-__pycache__/
-*.pyc
