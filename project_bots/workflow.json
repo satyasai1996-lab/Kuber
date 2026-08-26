@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "stages": [
+    {"id":"inspect","owners":["repository_analyst"],"required_evidence":["repository_map","reuse_modify_new_report"]},
+    {"id":"plan","owners":["project_manager","system_architect"],"required_evidence":["architecture_decision","acceptance_criteria"]},
+    {"id":"implement","owners":["backend_engineer","gex_engineer","options_ai_engineer","ai_orchestrator","broker_engineer","android_engineer"],"required_evidence":["changed_artifacts","implementation_tests"]},
+    {"id":"test","owners":["integration_engineer","qa_test_engineer","trading_safety_engineer"],"required_evidence":["test_report","safety_report"]},
+    {"id":"review","owners":["system_architect","security_auditor"],"required_evidence":["review_findings","security_findings"]},
+    {"id":"fix","owners":["backend_engineer","gex_engineer","options_ai_engineer","ai_orchestrator","broker_engineer","android_engineer"],"required_evidence":["fix_report"]},
+    {"id":"retest","owners":["integration_engineer","qa_test_engineer","trading_safety_engineer"],"required_evidence":["retest_report","tests_green"]},
+    {"id":"final_validate","owners":["security_auditor","release_manager"],"required_evidence":["security_review","paper_acceptance","change_log","rollback_plan"]},
+    {"id":"release","owners":["release_manager"],"required_evidence":["explicit_user_approval"]}
+  ]
+}

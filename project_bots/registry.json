@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "bots": [
+    {"id":"project_manager","name":"Project Manager","role":"Own milestones, dependencies, status and acceptance criteria","owns":["task_board","milestones","acceptance_criteria"],"outputs":["status","blockers","next_three_tasks","acceptance_checks"]},
+    {"id":"repository_analyst","name":"Repository Analyst","role":"Audit India Trade CLI before any rewrite","owns":["source_audit","reuse_modify_new","source_evidence"],"outputs":["repository_map","capability_evidence","reuse_modify_new_report"]},
+    {"id":"system_architect","name":"System Architect","role":"Own target architecture and interfaces","owns":["market_intelligence_schema","gex_schema","api_boundary","android_backend_boundary"],"outputs":["architecture_decision","interface_contracts","dependency_map"]},
+    {"id":"backend_engineer","name":"Backend Engineer","role":"Extend the Python and FastAPI backend while preserving CLI behavior","owns":["mobile_api","authentication_boundary","streaming","backend_services"],"outputs":["backend_changes","api_tests","compatibility_evidence"]},
+    {"id":"gex_engineer","name":"Gamma/GEX Engineer","role":"Own validated shared GEX calculations and snapshots","owns":["greeks","gex","gamma_flip","gamma_zones"],"outputs":["gex_snapshot","gex_tests","methodology_evidence"]},
+    {"id":"options_ai_engineer","name":"Options Analyst Engineer","role":"Own structured Options Analyst inputs and outputs","owns":["options_agent","option_chain_interpretation","pcr","iv_anomalies"],"outputs":["options_analysis_schema","options_agent_tests"]},
+    {"id":"ai_orchestrator","name":"AI Orchestrator","role":"Own seven analysts, conflicts, debate and synthesis","owns":["seven_analysts","scorecard","conflicts","debate","fund_manager","risk_handoff"],"outputs":["analysis_schema","orchestration_trace","partial_failure_tests"]},
+    {"id":"broker_engineer","name":"Broker Engineer","role":"Own common broker interface and adapters","owns":["paper_adapter","zerodha_adapter","angel_one_adapter","fyers_adapter","order_lifecycle"],"outputs":["adapter_contracts","adapter_tests","provider_readiness_report"]},
+    {"id":"android_engineer","name":"Android Engineer","role":"Build native Kotlin and Compose API client","owns":["android_app","compose_screens","rest_client","websocket_client","ui_state"],"outputs":["android_changes","ui_tests","device_test_evidence"]},
+    {"id":"integration_engineer","name":"Integration Engineer","role":"Connect Android through risk and broker boundaries","owns":["end_to_end_flow","schema_compatibility","timeouts","retries","paper_live_separation"],"outputs":["integration_report","contract_tests","end_to_end_tests"]},
+    {"id":"qa_test_engineer","name":"QA/Test Engineer","role":"Own unit, API, integration and Android acceptance tests","owns":["test_plan","regression_suite","acceptance_results"],"outputs":["test_report","failure_report","release_readiness"]},
+    {"id":"trading_safety_engineer","name":"Trading Safety Engineer","role":"Adversarially test trading controls","owns":["stale_data_gate","risk_limits","idempotency","confirmation_gate","risk_veto"],"outputs":["safety_report","adversarial_tests","vetoes"]},
+    {"id":"security_auditor","name":"Security Auditor","role":"Review secrets, auth, TLS, logging and API exposure","owns":["threat_review","secret_storage","authorization","tls","log_redaction"],"outputs":["security_report","findings","release_recommendation"]},
+    {"id":"release_manager","name":"Release Manager","role":"Apply the final release gate only","owns":["release_gate","change_log","rollback_plan","approval_record"],"outputs":["release_decision","release_manifest","rollback_plan"]}
+  ]
+}
