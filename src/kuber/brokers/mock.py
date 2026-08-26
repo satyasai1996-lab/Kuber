@@ -15,6 +15,7 @@ class MockBroker(BaseBroker):
     option_chain: tuple[OptionContract, ...] = ()
     funds: float = 200_000.0
     _orders: dict[str, OrderResponse] = field(default_factory=dict)
+    _positions: list[dict[str, object]] = field(default_factory=list)
 
     def get_quote(self, symbol: str) -> Quote:
         if self.quote is None or self.quote.symbol != symbol.upper():
@@ -27,7 +28,7 @@ class MockBroker(BaseBroker):
         return self.option_chain
 
     def get_positions(self) -> tuple[dict[str, object], ...]:
-        return ()
+        return tuple(self._positions)
 
     def get_holdings(self) -> tuple[dict[str, object], ...]:
         return ()
@@ -45,4 +46,13 @@ class MockBroker(BaseBroker):
             return existing
         response = OrderResponse(uuid4().hex, "FILLED", self.name, request.mode, request.idempotency_key)
         self._orders[request.idempotency_key] = response
+        fill_price = request.price or (self.quote.last_price if self.quote else 0.0)
+        self._positions.append({
+            "symbol": request.symbol,
+            "side": request.side.value,
+            "quantity": request.quantity,
+            "average_price": fill_price,
+            "mode": request.mode.value,
+            "unrealized_pnl": 0.0,
+        })
         return response

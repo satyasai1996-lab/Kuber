@@ -6,6 +6,11 @@ import retrofit2.http.POST
 import retrofit2.http.Path
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
 
 /** Android boundary for the FastAPI contract. No broker credential is represented here. */
 interface KuberApi {
@@ -16,6 +21,7 @@ interface KuberApi {
     @GET("brokers") suspend fun brokers(): List<BrokerStatusDto>
     @GET("portfolio") suspend fun portfolio(): PortfolioDto
     @GET("alerts") suspend fun alerts(): List<AlertDto>
+    @GET("analysis/latest/{symbol}") suspend fun latestAnalysis(@Path("symbol") symbol: String): AnalysisResultDto
     @POST("brokers/connect") suspend fun connectBroker(@Body request: BrokerConnectRequestDto): BrokerConnectionDto
     @POST("analysis/analyze") suspend fun analyze(@Body request: AnalysisRequestDto): AnalysisResultDto
     @POST("backtest") suspend fun backtest(@Body request: BacktestRequestDto): BacktestResultDto
@@ -40,7 +46,25 @@ data class PortfolioDto(val holdings: List<JsonObject>, val positions: List<Json
 @Serializable
 data class AnalysisRequestDto(val symbol: String, val quote: JsonObject, val options: List<JsonObject>)
 @Serializable
-data class AnalysisResultDto(val analysis_id: String, val final_bias: String, val risk: JsonObject)
+data class AnalysisResultDto(
+    val analysis_id: String,
+    val final_bias: String,
+    val agents: List<AgentDto>,
+    val scorecard: ScorecardDto,
+    val debate: DebateDto,
+    val trade_plans: List<TradePlanDto>,
+    val risk: RiskDto,
+)
+@Serializable
+data class AgentDto(val agent: String, val bias: String, val confidence: Int, val evidence: List<String>, val risks: List<String>)
+@Serializable
+data class ScorecardDto(val weighted_score: Double, val bias: String, val agreement_percent: Double, val conflicts: List<String>)
+@Serializable
+data class DebateDto(val bull_argument: String, val bear_argument: String, val facilitator_summary: String)
+@Serializable
+data class TradePlanDto(val direction: String? = null, val entry: Double? = null, val stop_loss: Double? = null, val targets: List<Double> = emptyList(), val quantity: Int, val risk_profile: String, val rationale: List<String>, val gex_context: String)
+@Serializable
+data class RiskDto(val approved: Boolean, val max_risk_amount: Double, val quantity: Int, val reasons: List<String>)
 @Serializable
 data class BacktestRequestDto(val candles: List<JsonObject>, val signals: List<JsonObject>, val initial_capital: Double = 200000.0, val allocation_percent: Double = 25.0, val transaction_cost_bps: Double = 10.0)
 @Serializable
@@ -54,6 +78,24 @@ data class BrokerConnectRequestDto(val broker: String, val credentials: JsonObje
 @Serializable
 data class BrokerConnectionDto(val broker: String, val connection_reference: String, val status: String)
 @Serializable
-data class PaperOrderDto(val symbol: String, val side: String, val quantity: Int, val idempotency_key: String)
+data class PaperOrderDto(val symbol: String, val side: String, val quantity: Int, val idempotency_key: String, val broker: String = "mock")
 @Serializable
 data class OrderDto(val order_id: String, val status: String, val broker: String, val mode: String)
+
+object KuberApiFactory {
+    fun create(endpoint: String, bearerToken: String? = null): KuberApi {
+        val normalized = if (endpoint.endsWith("/")) endpoint else "$endpoint/"
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request().newBuilder().apply {
+                if (!bearerToken.isNullOrBlank()) header("Authorization", "Bearer $bearerToken")
+            }.build()
+            chain.proceed(request)
+        }.build()
+        return Retrofit.Builder()
+            .baseUrl(normalized)
+            .client(client)
+            .addConverterFactory(Json { ignoreUnknownKeys = true }.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(KuberApi::class.java)
+    }
+}

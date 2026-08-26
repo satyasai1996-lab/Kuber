@@ -123,6 +123,7 @@ class KuberServices:
         self.registry = BrokerRegistry()
         self.execution = ExecutionService(self.registry)
         self.analyses: dict[str, Any] = {}
+        self.latest_analysis_by_symbol: dict[str, Any] = {}
         self.alerts = AlertStore()
         self.broker_connections = BrokerConnectionService()
 
@@ -162,13 +163,25 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
             sentiment_score=request.sentiment_score, sector_score=request.sector_score,
         ))
         app.state.services.analyses[result.analysis_id] = result
+        app.state.services.latest_analysis_by_symbol[result.intelligence.quote.symbol] = result
         return _json(asdict(result))
+
+    @app.post("/analysis/deep-analyze")
+    def deep_analyze(request: AnalysisRequest) -> Any:
+        return analyze(request)
 
     @app.get("/analysis/{analysis_id}")
     def get_analysis(analysis_id: str) -> Any:
         result = app.state.services.analyses.get(analysis_id)
         if result is None:
             raise HTTPException(status_code=404, detail="analysis not found")
+        return _json(asdict(result))
+
+    @app.get("/analysis/latest/{symbol}")
+    def get_latest_analysis(symbol: str) -> Any:
+        result = app.state.services.latest_analysis_by_symbol.get(symbol.upper())
+        if result is None:
+            raise HTTPException(status_code=404, detail="analysis not found; submit normalized provider data first")
         return _json(asdict(result))
 
     @app.get("/analysis/gex/{symbol}")

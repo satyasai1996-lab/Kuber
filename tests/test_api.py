@@ -29,6 +29,9 @@ class ApiTests(unittest.TestCase):
         snapshot = self.client.get("/analysis/gex/NIFTY")
         self.assertEqual(snapshot.status_code, 200)
         self.assertEqual(snapshot.json()["snapshot_id"], body["intelligence"]["snapshot"]["snapshot_id"])
+        latest = self.client.get("/analysis/latest/NIFTY")
+        self.assertEqual(latest.status_code, 200)
+        self.assertEqual(latest.json()["analysis_id"], body["analysis_id"])
 
     def test_paper_order_and_live_gate(self) -> None:
         self.client.post("/analysis/analyze", json=PAYLOAD)
