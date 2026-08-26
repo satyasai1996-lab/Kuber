@@ -3,6 +3,7 @@ import unittest
 from fastapi.testclient import TestClient
 
 from kuber.api.app import create_app
+from kuber.config import KuberSettings
 
 
 PAYLOAD = {
@@ -51,3 +52,12 @@ class ApiTests(unittest.TestCase):
         response = self.client.post("/backtest", json={"candles": candles, "signals": signals, "initial_capital": 1000, "allocation_percent": 100, "transaction_cost_bps": 0})
         self.assertEqual(response.status_code, 200)
         self.assertGreater(response.json()["total_return_percent"], 0)
+
+    def test_configured_token_protects_every_data_endpoint(self) -> None:
+        client = TestClient(create_app(settings=KuberSettings(api_token="test-token")))
+        self.assertEqual(client.get("/brokers").status_code, 401)
+        self.assertEqual(client.get("/brokers", headers={"Authorization": "Bearer test-token"}).status_code, 200)
+
+    def test_broker_connect_never_exposes_unconfigured_gateway(self) -> None:
+        response = self.client.post("/brokers/connect", json={"broker": "angel_one", "credentials": {"api_key": "temporary", "client_id": "user"}})
+        self.assertEqual(response.status_code, 503)

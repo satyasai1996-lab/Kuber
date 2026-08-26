@@ -6,7 +6,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from kuber.agents.base import AgentContext
@@ -14,6 +15,8 @@ from kuber.agents.coordinator import AnalysisCoordinator
 from kuber.alerts.service import AlertStore
 from kuber.backtest.engine import BacktestConfig, BotSignalBacktester
 from kuber.brokers.mock import MockBroker
+from kuber.brokers.connection import BrokerConnectionService
+from kuber.config import KuberSettings
 from kuber.execution.service import BrokerRegistry, ExecutionService
 from kuber.market.intelligence import SharedMarketIntelligence
 from kuber.market.normalizer import MarketDataNormalizer
@@ -107,6 +110,11 @@ class AlertPayload(BaseModel):
     condition: str
 
 
+class BrokerConnectPayload(BaseModel):
+    broker: str
+    credentials: dict[str, str]
+
+
 class KuberServices:
     def __init__(self) -> None:
         self.normalizer = MarketDataNormalizer()
@@ -116,6 +124,7 @@ class KuberServices:
         self.execution = ExecutionService(self.registry)
         self.analyses: dict[str, Any] = {}
         self.alerts = AlertStore()
+        self.broker_connections = BrokerConnectionService()
 
     def prepare(self, request: AnalysisRequest):
         quote = self.normalizer.normalize_quote(request.symbol, request.quote.model_dump(), request.quote.source)
@@ -126,9 +135,20 @@ class KuberServices:
         return intelligence
 
 
-def create_app(services: KuberServices | None = None) -> FastAPI:
+def create_app(services: KuberServices | None = None, settings: KuberSettings | None = None) -> FastAPI:
     app = FastAPI(title="Kuber API", version="v1", docs_url="/docs")
     app.state.services = services or KuberServices()
+    app.state.settings = settings or KuberSettings.from_environment()
+
+    @app.middleware("http")
+    async def token_auth(request: Request, call_next):
+        # A development install may run without a token. Any configured token protects
+        # every data/execution endpoint; Android never receives broker credentials.
+        token = app.state.settings.api_token
+        if token and request.url.path not in {"/health", "/docs", "/openapi.json"}:
+            if request.headers.get("Authorization") != f"Bearer {token}":
+                return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        return await call_next(request)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -207,6 +227,18 @@ def create_app(services: KuberServices | None = None) -> FastAPI:
     @app.get("/broker/status")
     def broker_status() -> Any:
         return app.state.services.registry.statuses()
+
+    @app.post("/brokers/connect")
+    def connect_broker(payload: BrokerConnectPayload) -> Any:
+        # Do not log this payload. The connection service clears it after the
+        # deployment connector has exchanged it for a server-side reference.
+        try:
+            connection = app.state.services.broker_connections.connect(payload.broker, dict(payload.credentials))
+            return _json(asdict(connection))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except RuntimeError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
 
     @app.get("/portfolio")
     def portfolio() -> Any:

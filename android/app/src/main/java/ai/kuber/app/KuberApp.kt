@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -33,7 +32,14 @@ fun KuberApp() {
     MaterialTheme {
         Scaffold { padding ->
             Column(modifier = Modifier.padding(padding)) {
-                KuberScreenPlaceholder(activeScreen)
+                if (activeScreen == KuberScreen.BROKER) {
+                    BrokerConnectScreen { _, _ ->
+                        // The networking layer submits transient fields over HTTPS and clears them.
+                        // No broker credential is written to Android storage.
+                    }
+                } else {
+                    KuberScreenPlaceholder(activeScreen)
+                }
                 LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.weight(1f)) {
                     items(KuberScreen.entries) { screen ->
                         Card(onClick = { activeScreen = screen }, modifier = Modifier.padding(8.dp)) {
@@ -68,6 +74,6 @@ private fun screenDescription(screen: KuberScreen): String = when (screen) {
     KuberScreen.PORTFOLIO -> "Broker-normalized holdings, positions, P&L, margin, and exposure."
     KuberScreen.BACKTEST -> "No-lookahead backtests over risk-approved AI-bot signals only."
     KuberScreen.ALERTS -> "Price, GEX regime, Gamma Flip, options-anomaly, and AI-decision alerts."
-    KuberScreen.BROKER -> "Paper, Angel One, Zerodha, and Fyers status. Credentials never enter the app."
+    KuberScreen.BROKER -> "Paper, Angel One, Zerodha, and Fyers. Credentials are entered only for a one-time secure hand-off and are then cleared."
     KuberScreen.SETTINGS -> "Risk limits, AI provider selection, notification preferences, and secure session controls."
 }

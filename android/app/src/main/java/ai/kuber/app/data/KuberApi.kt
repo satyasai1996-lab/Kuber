@@ -16,6 +16,7 @@ interface KuberApi {
     @GET("brokers") suspend fun brokers(): List<BrokerStatusDto>
     @GET("portfolio") suspend fun portfolio(): PortfolioDto
     @GET("alerts") suspend fun alerts(): List<AlertDto>
+    @POST("brokers/connect") suspend fun connectBroker(@Body request: BrokerConnectRequestDto): BrokerConnectionDto
     @POST("analysis/analyze") suspend fun analyze(@Body request: AnalysisRequestDto): AnalysisResultDto
     @POST("backtest") suspend fun backtest(@Body request: BacktestRequestDto): BacktestResultDto
     @POST("alerts") suspend fun createAlert(@Body request: AlertRequestDto): AlertDto
@@ -48,6 +49,10 @@ data class BacktestResultDto(val initial_capital: Double, val final_equity: Doub
 data class AlertRequestDto(val symbol: String, val kind: String, val condition: String)
 @Serializable
 data class AlertDto(val alert_id: String, val symbol: String, val kind: String, val condition: String, val enabled: Boolean)
+@Serializable
+data class BrokerConnectRequestDto(val broker: String, val credentials: JsonObject)
+@Serializable
+data class BrokerConnectionDto(val broker: String, val connection_reference: String, val status: String)
 @Serializable
 data class PaperOrderDto(val symbol: String, val side: String, val quantity: Int, val idempotency_key: String)
 @Serializable
