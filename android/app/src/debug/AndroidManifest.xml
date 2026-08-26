@@ -1,4 +1,3 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Home-LAN HTTP is allowed only in debug builds. Production must use HTTPS. -->
-    <application android:usesCleartextTraffic="true" />
+    <application android:usesCleartextTraffic="false" />
 </manifest>

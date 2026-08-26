@@ -1,8 +1,5 @@
 package ai.kuber.app
 
-import ai.kuber.app.data.BrokerConnectRequestDto
-import ai.kuber.app.data.DemoSessionDto
-import ai.kuber.app.data.KuberApiFactory
 import android.annotation.SuppressLint
 import android.graphics.Color
 import android.webkit.CookieManager
@@ -23,124 +20,69 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import kotlinx.coroutines.withContext
 
-/**
- * Real Kite OAuth flow. Zerodha renders its own login and 2FA page inside
- * Kuber. The APK never sees or stores a password, PIN, API secret, or access
- * token; it sends only the short-lived callback token to the Kuber backend.
- */
+/** Direct, session-only Kite login. No request token is sent to a Kuber server. */
 @Composable
-fun BrokerConnectScreen(
-    endpoint: String,
-    onEndpointChange: (String) -> Unit,
-    onDemoStarted: (DemoSessionDto) -> Unit,
-) {
+fun BrokerConnectScreen(runtime: LocalTradingRuntime, state: LocalKuberState, sync: () -> Unit) {
     val scope = rememberCoroutineScope()
+    var apiKey by remember { mutableStateOf("") }
+    var apiSecret by remember { mutableStateOf("") }
     var loginUrl by remember { mutableStateOf<String?>(null) }
-    var status by remember { mutableStateOf("Start paper demo, or connect your own Zerodha Kite app.") }
-
-    fun connectZerodha(requestToken: String) {
-        scope.launch {
-            loginUrl = null
-            status = "Connecting demo session…"
-            runCatching {
-                KuberApiFactory.create(endpoint).connectBroker(
-                    BrokerConnectRequestDto(
-                        broker = "zerodha",
-                        credentials = buildJsonObject { put("request_token", requestToken) },
-                    ),
-                )
-            }.onSuccess { connection ->
-                status = "Zerodha connected: ${connection.connection_reference}. Live orders remain controlled."
-            }.onFailure { error ->
-                status = "Zerodha connection failed: ${error.message ?: "check backend configuration and retry login"}"
-            }
+    var status by remember { mutableStateOf(state.status) }
+    fun complete(requestToken: String) {
+        val secret = apiSecret.toCharArray()
+        apiSecret = ""
+        scope.launch(Dispatchers.IO) {
+            runCatching { runtime.connectZerodha(apiKey.trim(), secret, requestToken) }
+                .onFailure { runtime.setStatus("Zerodha connection failed: ${it.message ?: "try login again"}") }
+            withContext(Dispatchers.Main) { loginUrl = null; sync(); status = runtime.state.status }
         }
     }
-
     loginUrl?.let { url ->
-        Column(modifier = Modifier.fillMaxSize()) {
-            Text("Sign in to Zerodha", modifier = Modifier.padding(16.dp))
-            Text("Your credentials and 2FA are entered only on Zerodha's page.", modifier = Modifier.padding(horizontal = 16.dp))
-            ZerodhaWebView(
-                loginUrl = url,
-                onRequestToken = ::connectZerodha,
-                modifier = Modifier.weight(1f),
-            )
-            Button(onClick = { loginUrl = null }, modifier = Modifier.padding(16.dp)) { Text("Cancel Zerodha login") }
+        Column(Modifier.fillMaxSize()) {
+            Text("Sign in to Zerodha Kite", Modifier.padding(16.dp))
+            Text("Enter password and 2FA only on Zerodha's page. Kuber reads only the short-lived callback token.", Modifier.padding(horizontal = 16.dp))
+            ZerodhaWebView(url, ::complete, Modifier.weight(1f))
+            Button(onClick = { loginUrl = null }, modifier = Modifier.padding(16.dp)) { Text("Cancel") }
         }
         return
     }
-
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("Broker and paper-trading setup")
-        Text("The broker key and secret belong only on your Kuber backend. The APK never stores them.")
-        OutlinedTextField(
-            value = endpoint,
-            onValueChange = { onEndpointChange(it.trimEnd('/')) },
-            label = { Text("Kuber HTTPS API endpoint") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Button(
-            enabled = endpoint.startsWith("https://") || endpoint.startsWith("http://"),
-            onClick = {
-                scope.launch {
-                    status = "Opening your Zerodha Kite login…"
-                    runCatching { KuberApiFactory.create(endpoint).zerodhaLogin().login_url }
-                        .onSuccess { url -> loginUrl = url }
-                        .onFailure { error ->
-                            status = "Cannot start Zerodha login: ${error.message ?: "configure the Kuber backend first"}"
-                        }
-                }
-            },
-        ) { Text("Connect Zerodha") }
-        Button(
-            enabled = endpoint.startsWith("https://") || endpoint.startsWith("http://"),
-            onClick = {
-                scope.launch {
-                    status = "Starting fixture-backed paper demo…"
-                    runCatching { KuberApiFactory.create(endpoint).startDemo() }
-                        .onSuccess { demo ->
-                            onDemoStarted(demo)
-                            status = "Paper demo ready. Its source is clearly labelled demo_fixture."
-                        }
-                        .onFailure { error -> status = "Cannot start paper demo: ${error.message ?: "check API endpoint"}" }
-                }
-            },
-            modifier = Modifier.padding(top = 8.dp),
-        ) { Text("Start safe paper demo") }
-        Text(status, modifier = Modifier.padding(top = 12.dp))
+    Column(Modifier.padding(16.dp)) {
+        Text("Direct Zerodha connection")
+        Text("For a personal installation, enter your own Kite Connect API key and secret for this session. They are never persisted.")
+        OutlinedTextField(apiKey, { apiKey = it }, label = { Text("Kite API key") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+        OutlinedTextField(apiSecret, { apiSecret = it }, label = { Text("Kite API secret (session only)") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+        Button(enabled = apiKey.isNotBlank() && apiSecret.isNotBlank(), onClick = {
+            status = "Opening Kite login…"
+            loginUrl = runCatching { runtime.loginUrl(apiKey.trim()) }.getOrElse { status = "Invalid API key: ${it.message}"; null }
+        }, modifier = Modifier.padding(top = 8.dp)) { Text("Sign in with Zerodha") }
+        if (state.connection.state.name == "CONNECTED") {
+            Button(onClick = { runtime.logout(); sync(); status = runtime.state.status }, modifier = Modifier.padding(top = 8.dp)) { Text("Clear phone session") }
+        }
+        Text(status, Modifier.padding(top = 10.dp))
     }
 }
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun ZerodhaWebView(loginUrl: String, onRequestToken: (String) -> Unit, modifier: Modifier = Modifier) {
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            WebView(context).apply {
-                setBackgroundColor(Color.TRANSPARENT)
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                CookieManager.getInstance().setAcceptCookie(true)
-                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                        val callbackToken = request.url.getQueryParameter("request_token")
-                        if (!callbackToken.isNullOrBlank()) {
-                            onRequestToken(callbackToken)
-                            return true
-                        }
-                        return false
-                    }
-                }
-                loadUrl(loginUrl)
+    AndroidView(modifier = modifier, factory = { context -> WebView(context).apply {
+        setBackgroundColor(Color.TRANSPARENT)
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+        webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                request.url.getQueryParameter("request_token")?.takeIf { it.isNotBlank() }?.let { onRequestToken(it); return true }
+                return false
             }
-        },
-    )
+        }
+        loadUrl(loginUrl)
+    } })
 }

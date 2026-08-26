@@ -1,23 +1,13 @@
 package ai.kuber.app
 
-import ai.kuber.app.data.AnalysisResultDto
-import ai.kuber.app.data.DemoSessionDto
-import ai.kuber.app.data.KuberApiFactory
-import ai.kuber.app.data.MarketRefreshDto
-import ai.kuber.app.data.OptionContractDto
-import ai.kuber.app.data.PortfolioDto
-import androidx.compose.foundation.Image
+import ai.kuber.core.model.analysis.Bias
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,50 +26,43 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.UUID
 
 private enum class KuberScreen(val label: String) {
-    HOME("Home"), ANALYSIS("AI Analysis"), GAMMA("Gamma"), OPTIONS("Options"),
-    TRADE_PLAN("Trade Plan"), PORTFOLIO("Portfolio"), BACKTEST("Backtest"),
-    ALERTS("Alerts"), BROKER("Broker"), SETTINGS("Settings"),
+    HOME("Home"), ANALYSIS("AI bots"), GAMMA("GEX"), OPTIONS("Options"),
+    TRADE_PLAN("Plans"), PORTFOLIO("Paper"), BROKER("Broker"), SETTINGS("Safety"),
 }
-/** Kuber is API-driven: authoritative analysis and orders stay in the backend. */
+
+/** All Kuber analysis, paper execution and broker calls run in this app process. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KuberApp() {
-    var activeScreen by remember { mutableStateOf(KuberScreen.HOME) }
-    var endpoint by remember { mutableStateOf("https://api.example.com") }
-    var demo by remember { mutableStateOf<DemoSessionDto?>(null) }
-
+    val runtime = remember { LocalTradingRuntime() }
+    var state by remember { mutableStateOf(runtime.state) }
+    var active by remember { mutableStateOf(KuberScreen.HOME) }
+    fun sync() { state = runtime.state }
     MaterialTheme {
-        Scaffold(
-            topBar = { TopAppBar(title = { Text("Kuber · ${activeScreen.label}") }) },
-        ) { padding ->
-            Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-                ScrollableTabRow(selectedTabIndex = KuberScreen.entries.indexOf(activeScreen)) {
+        Scaffold(topBar = { TopAppBar(title = { Text("Kuber · ${active.label}") }) }) { padding ->
+            Column(Modifier.padding(padding).fillMaxSize()) {
+                ScrollableTabRow(selectedTabIndex = KuberScreen.entries.indexOf(active)) {
                     KuberScreen.entries.forEach { screen ->
-                        Tab(
-                            selected = activeScreen == screen,
-                            onClick = { activeScreen = screen },
-                            text = { Text(screen.label) },
-                        )
+                        Tab(selected = active == screen, onClick = { active = screen }, text = { Text(screen.label) })
                     }
                 }
-                Box(modifier = Modifier.weight(1f)) {
-                    when (activeScreen) {
-                    KuberScreen.HOME -> HomeScreen(endpoint, demo, { endpoint = it }, { demo = it })
-                    KuberScreen.ANALYSIS -> AnalysisScreen(demo?.analysis)
-                    KuberScreen.GAMMA -> GammaScreen(demo)
-                    KuberScreen.OPTIONS -> OptionsScreen(demo?.options)
-                    KuberScreen.TRADE_PLAN -> TradePlanScreen(demo?.analysis)
-                    KuberScreen.PORTFOLIO -> PortfolioScreen(endpoint)
-                    KuberScreen.ALERTS -> AlertsScreen(endpoint)
-                    KuberScreen.BROKER -> BrokerConnectScreen(endpoint, { endpoint = it }, { demo = it })
-                    KuberScreen.BACKTEST -> BacktestScreen(demo?.analysis)
-                    KuberScreen.SETTINGS -> SettingsScreen()
+                Box(Modifier.weight(1f)) {
+                    when (active) {
+                        KuberScreen.HOME -> HomeScreen(runtime, state, ::sync)
+                        KuberScreen.ANALYSIS -> AnalysisScreen(state)
+                        KuberScreen.GAMMA -> GammaScreen(state)
+                        KuberScreen.OPTIONS -> OptionsScreen(state)
+                        KuberScreen.TRADE_PLAN -> TradePlanScreen(runtime, state, ::sync)
+                        KuberScreen.PORTFOLIO -> PortfolioScreen(runtime, state)
+                        KuberScreen.BROKER -> BrokerConnectScreen(runtime, state, ::sync)
+                        KuberScreen.SETTINGS -> SafetyScreen()
                     }
                 }
             }
@@ -88,221 +71,187 @@ fun KuberApp() {
 }
 
 @Composable
-private fun HomeScreen(endpoint: String, demo: DemoSessionDto?, onEndpointChange: (String) -> Unit, onDemoStarted: (DemoSessionDto) -> Unit) {
+private fun HomeScreen(runtime: LocalTradingRuntime, state: LocalKuberState, sync: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var status by remember { mutableStateOf("Start a safe demo or configure a broker from the Broker tab.") }
-    Column(modifier = Modifier.padding(16.dp)) {
-        Image(
-            painter = painterResource(R.drawable.kuber_market_hero),
-            contentDescription = "Kuber market intelligence",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxWidth().height(132.dp),
-        )
-        Text("Kuber", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 12.dp))
-        Text("AI-bot market intelligence with paper trading by default")
-        OutlinedTextField(
-            value = endpoint,
-            onValueChange = { onEndpointChange(it.trimEnd('/')) },
-            label = { Text("Kuber API endpoint") },
-            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-        )
-        Button(
-            enabled = endpoint.startsWith("https://") || endpoint.startsWith("http://"),
-            onClick = {
-                scope.launch {
-                    status = "Loading paper demo…"
-                    runCatching { KuberApiFactory.create(endpoint).startDemo() }
-                        .onSuccess { session -> onDemoStarted(session); status = session.notice }
-                        .onFailure { error -> status = "Demo unavailable: ${error.message ?: "check the API endpoint"}" }
-                }
-            },
-            modifier = Modifier.padding(top = 8.dp),
-        ) { Text("Start safe paper demo") }
-        Button(
-            enabled = endpoint.startsWith("https://") || endpoint.startsWith("http://"),
-            onClick = {
-                scope.launch {
-                    status = "Refreshing connected Zerodha data…"
-                    runCatching { KuberApiFactory.create(endpoint).refreshMarket("NIFTY", MarketRefreshDto()) }
-                        .onSuccess { result -> status = "Live broker snapshot refreshed: ${result.final_bias}. Open Analysis for all seven bot results." }
-                        .onFailure { error -> status = "Live refresh unavailable: ${error.message ?: "connect Zerodha first"}" }
-                }
-            },
-            modifier = Modifier.padding(top = 8.dp),
-        ) { Text("Refresh connected market data") }
-        demo?.let { session ->
-            Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text("${session.symbol} · ${session.source}", style = MaterialTheme.typography.titleMedium)
-                    Text("₹${"%.2f".format(session.quote.last_price)} · ${session.gex.regime} GEX · ${session.analysis.final_bias}")
-                    Text("${session.analysis.risk.approved.let { if (it) "Risk approved" else "Risk blocked" }} · data ${session.quote.timestamp}")
-                }
+    var busy by remember { mutableStateOf(false) }
+    Column(Modifier.padding(16.dp)) {
+        Text("On-phone market intelligence", style = MaterialTheme.typography.headlineSmall)
+        Text("No Kuber API endpoint, laptop, or Kuber cloud service is used.")
+        Button(enabled = !busy, onClick = {
+            busy = true
+            scope.launch(Dispatchers.IO) {
+                runCatching { runtime.loadPaperDemo() }.onFailure { runtime.setStatus("Demo failed: ${it.message}") }
+                withContext(Dispatchers.Main) { sync(); busy = false }
             }
-        }
-        Text(status, modifier = Modifier.padding(top = 8.dp))
+        }, modifier = Modifier.padding(top = 12.dp)) { Text("Load local paper demo") }
+        Button(enabled = !busy && state.connection.state.name == "CONNECTED", onClick = {
+            busy = true
+            scope.launch(Dispatchers.IO) {
+                runCatching { runtime.refreshZerodha() }.onFailure { runtime.setStatus("Live refresh failed: ${it.message ?: "check Kite session"}") }
+                withContext(Dispatchers.Main) { sync(); busy = false }
+            }
+        }, modifier = Modifier.padding(top = 8.dp)) { Text("Refresh live Zerodha data") }
+        SnapshotCard(state)
     }
 }
 
 @Composable
-private fun AnalysisScreen(analysis: AnalysisResultDto?) {
-    if (analysis == null) return NeedSession("Start the safe paper demo first. It runs all seven analysts against one timestamped backend snapshot.")
-    LazyColumn(modifier = Modifier.padding(16.dp)) {
+private fun SnapshotCard(state: LocalKuberState) {
+    Card(Modifier.fillMaxWidth().padding(top = 14.dp)) { Column(Modifier.padding(12.dp)) {
+        val market = state.market
+        Text(if (state.liveData) "DIRECT ZERODHA SNAPSHOT" else "LOCAL PAPER FIXTURE", style = MaterialTheme.typography.titleMedium)
+        if (market != null) {
+            Text("${market.quote.symbol}  ₹${"%.2f".format(market.quote.lastPrice)} · ${market.gexSnapshot.regime}")
+            Text("Snapshot ${market.inputVersion.take(12)} · ${market.quote.source}")
+        }
+        Text(state.status, Modifier.padding(top = 6.dp))
+    } }
+}
+
+@Composable
+private fun AnalysisScreen(state: LocalKuberState) {
+    val analysis = state.analysis ?: return NeedSnapshot()
+    LazyColumn(Modifier.padding(16.dp)) {
         item {
-            Text("Seven AI analysts", style = MaterialTheme.typography.headlineSmall)
-            Text("Final bias: ${analysis.final_bias} · ${"%.0f".format(analysis.scorecard.agreement_percent)}% agreement")
-            if (analysis.scorecard.conflicts.isNotEmpty()) Text("Conflicts: ${analysis.scorecard.conflicts.joinToString()}")
+            Text("Required bot workflow", style = MaterialTheme.typography.headlineSmall)
+            Text("Schema validation → scorecard/conflicts → Bull → Bear → rebuttals → facilitator → fund manager → Risk Manager → three plans → gate")
+            Text("Final: ${analysis.finalBias} · agreement ${"%.0f".format(analysis.scorecard.agreementPercent)}%")
         }
-        items(analysis.agents.size) { index ->
-            val agent = analysis.agents[index]
-            Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text("${agent.agent}: ${agent.bias} (${agent.confidence}%)", style = MaterialTheme.typography.titleMedium)
-                    Text(agent.evidence.joinToString())
-                    if (agent.risks.isNotEmpty()) Text("Risk: ${agent.risks.joinToString()}")
-                }
-            }
+        items(analysis.analysts.size) { i ->
+            val result = analysis.analysts[i]
+            Card(Modifier.fillMaxWidth().padding(top = 8.dp)) { Column(Modifier.padding(12.dp)) {
+                Text("${result.analyst}: ${result.bias} (${result.confidence}%)", style = MaterialTheme.typography.titleMedium)
+                Text(result.evidence.joinToString())
+                if (result.risks.isNotEmpty()) Text("Risk: ${result.risks.joinToString()}")
+            } }
         }
+        item { Card(Modifier.fillMaxWidth().padding(top = 8.dp)) { Column(Modifier.padding(12.dp)) {
+            Text("Debate and final control", style = MaterialTheme.typography.titleMedium)
+            Text("Bull: ${analysis.debate.bullArgument}")
+            Text("Bear: ${analysis.debate.bearArgument}")
+            Text("Rebuttals: ${analysis.debate.bullRebuttal} / ${analysis.debate.bearRebuttal}")
+            Text("Facilitator: ${analysis.debate.facilitatorSummary}")
+            Text("Fund manager: ${analysis.fundManager.bias} · GEX ${analysis.fundManager.gexAlignment}")
+            Text("Risk Manager: ${if (analysis.finalRisk.approved) "APPROVED" else "BLOCKED"} — ${analysis.finalRisk.reasons.joinToString()}")
+        } } }
+    }
+}
+
+@Composable
+private fun GammaScreen(state: LocalKuberState) {
+    val gex = state.market?.gexSnapshot ?: return NeedSnapshot()
+    Column(Modifier.padding(16.dp)) {
+        Text("Gamma exposure", style = MaterialTheme.typography.headlineSmall)
+        Text("${gex.symbol} · ${gex.regime} · net ${"%.0f".format(gex.totalGex)}")
+        Text("Gamma flip: ${gex.gammaFlip?.let { "₹${"%.2f".format(it)}" } ?: "not found"}")
+        Text("Walls: ${gex.gammaWalls.joinToString()}")
+        Text("Calculated only from the same immutable option-chain snapshot.", Modifier.padding(top = 10.dp))
+    }
+}
+
+@Composable
+private fun OptionsScreen(state: LocalKuberState) {
+    val market = state.market ?: return NeedSnapshot()
+    val analytics = state.options
+    LazyColumn(Modifier.padding(16.dp)) {
         item {
-            Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text("Bull / Bear review", style = MaterialTheme.typography.titleMedium)
-                    Text("Bull: ${analysis.debate.bull_argument}")
-                    Text("Bear: ${analysis.debate.bear_argument}")
-                    Text("Decision: ${analysis.debate.facilitator_summary}")
-                    Text("Risk veto: ${if (analysis.risk.approved) "approved" else "blocked"} — ${analysis.risk.reasons.joinToString()}")
-                }
-            }
+            Text("Option chain", style = MaterialTheme.typography.headlineSmall)
+            analytics?.let { Text("PCR ${it.putCallRatios.openInterest?.let { ratio -> "%.2f".format(ratio) } ?: "—"} · IV skew ${it.putMinusCallIvSkew?.let { skew -> "%.2f".format(skew) } ?: "—"}") }
+        }
+        items(market.optionChain.size) { i ->
+            val option = market.optionChain[i]
+            Card(Modifier.fillMaxWidth().padding(top = 7.dp)) { Column(Modifier.padding(10.dp)) {
+                Text("${option.strike} ${option.optionType} · ${option.expiry}", style = MaterialTheme.typography.titleMedium)
+                Text("LTP ₹${option.lastPrice} · OI ${option.openInterest} · IV ${"%.2f".format(option.impliedVolatility * 100)}% · gamma ${option.gamma}")
+            } }
         }
     }
 }
 
 @Composable
-private fun GammaScreen(demo: DemoSessionDto?) {
-    if (demo == null) return NeedSession("Start the demo to view the backend-calculated GEX snapshot.")
-    val gex = demo.gex
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("Gamma / GEX", style = MaterialTheme.typography.headlineSmall)
-        Text("${gex.symbol} · ${gex.regime} regime")
-        Text("Spot: ₹${"%.2f".format(gex.spot)}")
-        Text("Net GEX: ${"%.2f".format(gex.total_gex)}")
-        Text("Gamma flip: ${gex.gamma_flip?.let { "₹${"%.2f".format(it)}" } ?: "not found"}")
-        Text("Gamma walls: ${gex.gamma_walls.joinToString()}")
-        Text("Expiry: ${gex.expiry_set.joinToString()}")
-        Text("Source: ${gex.source} · ${gex.timestamp}", modifier = Modifier.padding(top = 8.dp))
-        Text("Demo values are fixture data; they are not live market data.", modifier = Modifier.padding(top = 8.dp))
-    }
-}
-
-@Composable
-private fun OptionsScreen(options: List<OptionContractDto>?) {
-    if (options == null) return NeedSession("Start the demo to inspect the normalised option chain and GEX inputs.")
-    LazyColumn(modifier = Modifier.padding(16.dp)) {
-        item { Text("Options", style = MaterialTheme.typography.headlineSmall) }
-        items(options.size) { index ->
-            val option = options[index]
-            Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text("${option.strike} ${option.option_type} · ${option.expiry}", style = MaterialTheme.typography.titleMedium)
-                    Text("OI ${option.open_interest} · IV ${option.implied_volatility}% · Gamma ${option.gamma}")
-                    Text("LTP ₹${option.last_price} · Volume ${option.volume}")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TradePlanScreen(analysis: AnalysisResultDto?) {
-    if (analysis == null) return NeedSession("Start the demo to view risk-vetted trade plans.")
-    LazyColumn(modifier = Modifier.padding(16.dp)) {
-        item { Text("Trade plans", style = MaterialTheme.typography.headlineSmall) }
-        items(analysis.trade_plans.size) { index ->
-            val plan = analysis.trade_plans[index]
-            Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(plan.risk_profile.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleMedium)
-                    Text("${plan.direction ?: "HOLD"} · entry ${plan.entry ?: "—"} · stop ${plan.stop_loss ?: "—"}")
-                    Text("Targets: ${plan.targets.joinToString()} · quantity ${plan.quantity}")
-                    Text("GEX: ${plan.gex_context}")
-                    Text(plan.rationale.joinToString())
-                }
-            }
-        }
-        item { Text("Paper orders only until the backend release gate and explicit live confirmation pass.", modifier = Modifier.padding(top = 12.dp)) }
-    }
-}
-
-@Composable
-private fun PortfolioScreen(endpoint: String) {
+private fun TradePlanScreen(runtime: LocalTradingRuntime, state: LocalKuberState, sync: () -> Unit) {
+    val analysis = state.analysis ?: return NeedSnapshot()
     val scope = rememberCoroutineScope()
-    var portfolio by remember { mutableStateOf<PortfolioDto?>(null) }
-    var status by remember { mutableStateOf("Refresh to load backend-normalised paper/broker portfolio.") }
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("Portfolio", style = MaterialTheme.typography.headlineSmall)
-        Button(onClick = {
-            scope.launch {
-                runCatching { KuberApiFactory.create(endpoint).portfolio() }
-                    .onSuccess { portfolio = it; status = "Portfolio refreshed." }
-                    .onFailure { status = "Portfolio unavailable: check API endpoint." }
-            }
-        }, modifier = Modifier.padding(top = 8.dp)) { Text("Refresh portfolio") }
-        portfolio?.let {
-            Text("Funds: ₹${it.funds}", modifier = Modifier.padding(top = 10.dp))
-            Text("Positions: ${it.positions.size} · Holdings: ${it.holdings.size}")
+    LazyColumn(Modifier.padding(16.dp)) {
+        item { Text("Three risk profiles", style = MaterialTheme.typography.headlineSmall) }
+        items(analysis.tradePlans.size) { i ->
+            val plan = analysis.tradePlans[i]
+            Card(Modifier.fillMaxWidth().padding(top = 8.dp)) { Column(Modifier.padding(12.dp)) {
+                Text(plan.profile.name, style = MaterialTheme.typography.titleMedium)
+                Text("${plan.direction} · entry ${plan.entry ?: "—"} · stop ${plan.stopLoss ?: "—"}")
+                Text("Targets ${plan.targets.joinToString()} · R/R ${plan.rewardRisk ?: "—"} · qty ${plan.quantity}")
+                Button(enabled = plan.quantity > 0 && plan.direction in setOf(Bias.BULLISH, Bias.BEARISH), onClick = {
+                    scope.launch(Dispatchers.IO) {
+                        runCatching { runtime.submitPaper(plan.profile) }.onFailure { runtime.setStatus("Paper order blocked: ${it.message}") }
+                        withContext(Dispatchers.Main) { sync() }
+                    }
+                }, modifier = Modifier.padding(top = 6.dp)) { Text("Execute local paper order") }
+                LivePlanControl(runtime, state, plan.profile, plan.quantity, sync)
+            } }
         }
-        Text(status, modifier = Modifier.padding(top = 8.dp))
+        item { Text("Live orders are not exposed until the final on-device confirmation UI is complete.", Modifier.padding(top = 12.dp)) }
     }
 }
 
 @Composable
-private fun AlertsScreen(endpoint: String) {
+private fun LivePlanControl(runtime: LocalTradingRuntime, state: LocalKuberState, profile: ai.kuber.core.model.analysis.RiskProfile, approvedQuantity: Int, sync: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var status by remember { mutableStateOf("Refresh to load Kuber alert rules.") }
-    var count by remember { mutableStateOf<Int?>(null) }
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("Alerts", style = MaterialTheme.typography.headlineSmall)
-        Button(onClick = {
-            scope.launch {
-                runCatching { KuberApiFactory.create(endpoint).alerts() }
-                    .onSuccess { count = it.size; status = "Alert rules refreshed." }
-                    .onFailure { status = "Alerts unavailable: check API endpoint." }
+    var exchange by remember { mutableStateOf("NFO") }
+    var symbol by remember { mutableStateOf("") }
+    var quantity by remember { mutableStateOf(approvedQuantity.toString()) }
+    var requestId by remember { mutableStateOf(UUID.randomUUID().toString()) }
+    var hash by remember { mutableStateOf<String?>(null) }
+    var acknowledgement by remember { mutableStateOf("") }
+    val canReview = state.liveData && state.connection.state.name == "CONNECTED" && symbol.isNotBlank() && quantity.toIntOrNull() != null
+    Column(Modifier.padding(top = 8.dp)) {
+        Text("Live Kite order — requires review", style = MaterialTheme.typography.labelLarge)
+        OutlinedTextField(exchange, { exchange = it.uppercase(); hash = null }, label = { Text("Exchange (NFO/NSE/BSE)") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(symbol, { symbol = it.uppercase(); hash = null }, label = { Text("Exact Kite trading symbol") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit); hash = null }, label = { Text("Quantity (max $approvedQuantity)") }, modifier = Modifier.fillMaxWidth())
+        Button(enabled = canReview, onClick = {
+            scope.launch(Dispatchers.IO) {
+                hash = runCatching { runtime.previewLive(profile, exchange, symbol, quantity.toInt(), requestId) }.getOrElse { runtime.setStatus("Live review blocked: ${it.message}"); null }
+                withContext(Dispatchers.Main) { sync() }
             }
-        }, modifier = Modifier.padding(top = 8.dp)) { Text("Refresh alerts") }
-        Text("Configured alerts: ${count ?: "—"}", modifier = Modifier.padding(top = 8.dp))
-        Text(status)
+        }) { Text("Generate order review") }
+        hash?.let { reviewed ->
+            Text("Review hash: ${reviewed.take(16)}…", Modifier.padding(top = 4.dp))
+            Text("Verify broker symbol, direction, quantity and risk. Type LIVE to send this exact reviewed order.")
+            OutlinedTextField(acknowledgement, { acknowledgement = it }, label = { Text("Type LIVE") }, modifier = Modifier.fillMaxWidth())
+            Button(enabled = acknowledgement == "LIVE", onClick = {
+                scope.launch(Dispatchers.IO) {
+                    runCatching { runtime.submitLive(profile, exchange, symbol, quantity.toInt(), requestId, reviewed, acknowledgement) }
+                        .onFailure { runtime.setStatus("Live order blocked: ${it.message}") }
+                    withContext(Dispatchers.Main) { sync(); acknowledgement = ""; hash = null; requestId = UUID.randomUUID().toString() }
+                }
+            }) { Text("Submit reviewed live order") }
+        }
+        if (!state.liveData) Text("Disabled until a direct live Zerodha snapshot has been refreshed.")
     }
 }
 
 @Composable
-private fun BacktestScreen(analysis: AnalysisResultDto?) {
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("No-lookahead backtest", style = MaterialTheme.typography.headlineSmall)
-        Text("Kuber accepts only risk-approved bot signals and checks each signal against candles available at that timestamp.")
-        Text(
-            if (analysis == null) "Start the demo before supplying historical candles to the backend backtest endpoint."
-            else "Demo analysis is ready to be converted to a risk-approved historical signal; live data is never used as future knowledge.",
-            modifier = Modifier.padding(top = 8.dp),
-        )
+private fun PortfolioScreen(runtime: LocalTradingRuntime, state: LocalKuberState) {
+    val portfolio = runtime.paperPortfolio()
+    Column(Modifier.padding(16.dp)) {
+        Text("Local paper portfolio", style = MaterialTheme.typography.headlineSmall)
+        Text("Cash ₹${"%.2f".format(portfolio.funds)} · orders ${portfolio.orders.size}")
+        portfolio.positions.forEach { Text("${it.tradingSymbol}: ${it.quantity} @ ${it.averagePrice} · P&L ${it.pnl}") }
+        Text("Audit events ${runtime.auditEvents().size}", Modifier.padding(top = 10.dp))
+        Text(state.status, Modifier.padding(top = 8.dp))
     }
 }
 
 @Composable
-private fun SettingsScreen() {
-    Column(modifier = Modifier.padding(16.dp)) {
-        Text("Safety and settings", style = MaterialTheme.typography.headlineSmall)
-        Text("Broker secrets, access tokens and OpenAI keys remain on the backend. The Android app stores no provider secret.")
-        Text("Production uses HTTPS and authentication. Paper mode is default; live orders require a release-gate review and explicit confirmation.", modifier = Modifier.padding(top = 8.dp))
-    }
+private fun SafetyScreen() = Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Text("Safety boundary", style = MaterialTheme.typography.headlineSmall)
+    Text("Kuber has no configured server endpoint. Market data and orders go directly from this phone to the broker over HTTPS.")
+    Text("Kite credentials are entered on Kite's own page. The session token is held only in memory and cleared at logout or app process death.")
+    Text("Paper mode is local. Live execution requires a fresh snapshot, final Risk Manager approval, order-hash review, and typing LIVE.")
+    Text("No broker password, PIN, API secret, or access token is saved in the APK.")
 }
 
 @Composable
-private fun NeedSession(message: String) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("Kuber", style = MaterialTheme.typography.headlineMedium)
-        Text(message)
-    }
+private fun NeedSnapshot() = Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Text("Load the local paper demo or connect Zerodha first.")
 }

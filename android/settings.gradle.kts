@@ -11,3 +11,10 @@ dependencyResolutionManagement {
 }
 rootProject.name = "Kuber"
 include(":app")
+include(":core-model")
+include(":core-market")
+include(":core-risk")
+include(":core-agents")
+include(":core-broker")
+include(":core-paper")
+include(":core-execution")
