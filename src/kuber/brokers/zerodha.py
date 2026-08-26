@@ -8,11 +8,12 @@ them explicitly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
 from kuber.brokers.connection import BrokerConnection
 from kuber.brokers.providers import ZerodhaBroker
+from kuber.market.option_chain import ZerodhaOptionChainBuilder
 from kuber.models import OptionContract, OrderRequest, OrderResponse, Quote, utc_now
 
 
@@ -21,6 +22,7 @@ class KiteClient(Protocol):
     def generate_session(self, request_token: str, api_secret: str) -> dict[str, Any]: ...
     def set_access_token(self, access_token: str) -> None: ...
     def quote(self, instruments: list[str]) -> dict[str, dict[str, Any]]: ...
+    def instruments(self, exchange: str | None = None) -> list[dict[str, Any]]: ...
     def positions(self) -> dict[str, list[dict[str, Any]]]: ...
     def holdings(self) -> list[dict[str, Any]]: ...
     def margins(self) -> dict[str, Any]: ...
@@ -50,6 +52,7 @@ class ZerodhaKiteGateway:
     """Normalises selected Kite operations to Kuber's broker gateway contract."""
 
     client: KiteClient
+    option_chain_builder: ZerodhaOptionChainBuilder | None = None
 
     def quote(self, symbol: str) -> Quote:
         instrument = _instrument_for(symbol)
@@ -59,6 +62,8 @@ class ZerodhaKiteGateway:
         timestamp = payload.get("timestamp") or payload.get("last_trade_time") or utc_now()
         if isinstance(timestamp, str):
             timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
         return Quote(
             symbol=symbol.upper(),
             last_price=float(payload["last_price"]),
@@ -68,10 +73,8 @@ class ZerodhaKiteGateway:
         )
 
     def option_chain(self, symbol: str) -> tuple[OptionContract, ...]:
-        # Kite Connect returns quotes for a supplied instrument list rather than
-        # a canonical option-chain endpoint. Kuber will expose this only after
-        # an instrument-master based chain builder is validated.
-        raise NotImplementedError("Zerodha option-chain normalization is not configured yet")
+        builder = self.option_chain_builder or ZerodhaOptionChainBuilder(self.client)
+        return builder.build(symbol, self.quote(symbol).last_price)
 
     def positions(self) -> tuple[dict[str, object], ...]:
         return tuple(self.client.positions().get("net", ()))

@@ -2,7 +2,10 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from kuber.api.app import create_app
+from kuber.api.app import KuberServices, create_app
+from kuber.brokers.mock import MockBroker
+from kuber.models import OptionContract, Quote
+from datetime import datetime, timezone
 from kuber.config import KuberSettings
 
 
@@ -80,6 +83,19 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/brokers/zerodha/login-url")
         self.assertEqual(response.status_code, 503)
         self.assertIn("KUBER_ZERODHA_API_KEY", response.json()["detail"])
+
+    def test_refreshes_market_intelligence_from_an_already_connected_data_broker(self) -> None:
+        services = KuberServices()
+        quote = Quote("NIFTY", 22_000, datetime.now(timezone.utc), "zerodha")
+        options = (
+            OptionContract("NIFTY", 21_900, "2026-08-27", "CE", 100, 14, 0.02, 130, 25),
+            OptionContract("NIFTY", 22_100, "2026-08-27", "PE", 100, 15, 0.02, 125, 25),
+        )
+        services.registry.register(MockBroker(name="zerodha", quote=quote, option_chain=options))
+        client = TestClient(create_app(services=services))
+        response = client.post("/market/refresh/NIFTY", json={"broker": "zerodha"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["intelligence"]["quote"]["source"], "zerodha")
 
     def test_openai_opinion_requires_backend_key_and_existing_analysis(self) -> None:
         self.client.post("/analysis/analyze", json=PAYLOAD)

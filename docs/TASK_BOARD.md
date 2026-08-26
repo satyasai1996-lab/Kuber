@@ -16,8 +16,9 @@ This is the active Kuber version of the supplied project-bot task board.
 - [x] Real Zerodha backend OAuth boundary (requires user deployment configuration)
 - [x] No-account fixture-backed paper demo session
 - [ ] Verify and implement current Angel One and Fyers SDK adapters
-- [ ] Add validated real option-chain builders per provider
-- [ ] Add authenticated streaming contracts and reconnect tests
+- [x] Add validated Zerodha option-chain builder from instrument and live quote data
+- [x] Add authenticated WebSocket quote stream with reconnect-safe latest-value replay
+- [ ] Add equivalent Angel One and Fyers data builders/streams
 
 ## Phase 2 — Android
 
@@ -26,13 +27,14 @@ This is the active Kuber version of the supplied project-bot task board.
 - [x] Portfolio, Alerts and Broker screens
 - [x] Production OAuth onboarding with paper-demo fallback
 - [ ] Android UI / device tests and API-token storage through Android Keystore
-- [ ] Real-time stream presentation after backend streaming is verified
+- [ ] Android WebSocket client presentation after device verification
 
 ## Phase 3 — Verification
 
 - [x] Unit, GEX, agent-schema, risk-gate, API and mock-order tests
 - [x] Zerodha OAuth boundary tests with an injected fake Kite client
 - [x] Debug APK compilation
+- [x] Offline Zerodha option-chain and WebSocket reconnect contract tests
 - [ ] Angel One and Fyers adapter acceptance tests against current provider requirements
 - [ ] Android device/UI acceptance tests
 - [ ] Paper-trading user acceptance

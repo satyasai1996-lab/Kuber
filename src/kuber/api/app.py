@@ -1,12 +1,14 @@
 """Versioned FastAPI contract for the Kuber Android client."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict
 from datetime import datetime
 from enum import Enum
+from queue import Empty
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -23,6 +25,7 @@ from kuber.config import KuberSettings
 from kuber.execution.service import BrokerRegistry, ExecutionService
 from kuber.market.intelligence import SharedMarketIntelligence
 from kuber.market.normalizer import MarketDataNormalizer
+from kuber.market.streaming import MarketStreamBus
 from kuber.models import Bias, BotSignal, Candle, OrderRequest, OrderSide, TradingMode
 
 
@@ -118,6 +121,14 @@ class BrokerConnectPayload(BaseModel):
     credentials: dict[str, str]
 
 
+class MarketRefreshPayload(BaseModel):
+    broker: str = "zerodha"
+    fundamentals: dict[str, float] = Field(default_factory=dict)
+    news_bias: float = 0
+    sentiment_score: float = 0
+    sector_score: float = 0
+
+
 class KuberServices:
     def __init__(self, settings: KuberSettings | None = None, openai_decision: OpenAIDecisionService | None = None) -> None:
         configured_settings = settings or KuberSettings.from_environment()
@@ -130,6 +141,7 @@ class KuberServices:
         self.analyses: dict[str, Any] = {}
         self.latest_analysis_by_symbol: dict[str, Any] = {}
         self.alerts = AlertStore()
+        self.stream = MarketStreamBus()
         # Sandbox is intentionally not the default path. A real Kite connection
         # is available only when a backend deployment provides its own app key
         # and secret; none of those values exist in Android or this source tree.
@@ -151,7 +163,27 @@ class KuberServices:
         intelligence = self.intelligence.publish(quote, options)
         mock = MockBroker(quote=quote, option_chain=options)
         self.registry.register(mock)
+        self.stream.publish(quote)
         return intelligence
+
+    def refresh_from_broker(self, symbol: str, payload: MarketRefreshPayload):
+        """Fetch a fresh provider quote/option chain and publish one analysis snapshot."""
+        broker = self.registry.get(payload.broker.lower())
+        quote = broker.get_quote(symbol)
+        options = broker.get_options_chain(symbol)
+        intelligence = self.intelligence.publish(quote, options)
+        self.registry.register(MockBroker(quote=quote, option_chain=options))
+        self.stream.publish(quote)
+        result = self.coordinator.analyze(AgentContext(
+            intelligence=intelligence,
+            fundamentals=payload.fundamentals,
+            news_bias=payload.news_bias,
+            sentiment_score=payload.sentiment_score,
+            sector_score=payload.sector_score,
+        ))
+        self.analyses[result.analysis_id] = result
+        self.latest_analysis_by_symbol[quote.symbol] = result
+        return result
 
     def start_demo(self):
         """Create a visible, strictly paper-only fixture session.
@@ -288,6 +320,45 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
         if intelligence is None:
             raise HTTPException(status_code=404, detail="quote not found")
         return _json(asdict(intelligence.quote))
+
+    @app.post("/market/refresh/{symbol}")
+    def refresh_market(symbol: str, payload: MarketRefreshPayload) -> Any:
+        """Refresh backend market intelligence from an already connected broker.
+
+        This data-only operation neither creates nor submits an order.
+        """
+        try:
+            return _json(asdict(app.state.services.refresh_from_broker(symbol, payload)))
+        except (LookupError, NotImplementedError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.websocket("/market/stream/{symbol}")
+    async def market_stream(websocket: WebSocket, symbol: str, token: str | None = None) -> None:
+        """Authenticated quote fan-out with reconnect-safe latest-value replay."""
+        expected = app.state.settings.api_token
+        supplied = websocket.headers.get("Authorization") or (f"Bearer {token}" if token else None)
+        if expected and supplied != f"Bearer {expected}":
+            await websocket.close(code=1008)
+            return
+        normalized = symbol.upper()
+        await websocket.accept()
+        subscriber = app.state.services.stream.subscribe(normalized)
+        try:
+            await websocket.send_json({"kind": "stream_status", "state": "connected", "symbol": normalized})
+            latest = app.state.services.stream.latest(normalized)
+            if latest is not None:
+                await websocket.send_json(app.state.services.stream.payload(latest))
+            while True:
+                try:
+                    quote = await asyncio.to_thread(subscriber.get, True, 15)
+                except Empty:
+                    await websocket.send_json({"kind": "heartbeat", "symbol": normalized})
+                    continue
+                await websocket.send_json(app.state.services.stream.payload(quote))
+        except WebSocketDisconnect:
+            return
+        finally:
+            app.state.services.stream.unsubscribe(normalized, subscriber)
 
     @app.get("/options/chain/{symbol}")
     def option_chain(symbol: str) -> Any:

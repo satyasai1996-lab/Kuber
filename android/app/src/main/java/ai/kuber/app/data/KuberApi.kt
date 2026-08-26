@@ -12,6 +12,8 @@ import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 
+private val kuberJson = Json { ignoreUnknownKeys = true }
+
 /** Android boundary for the FastAPI contract. No broker credential is represented here. */
 interface KuberApi {
     @GET("market/quote/{symbol}") suspend fun quote(@Path("symbol") symbol: String): QuoteDto
@@ -27,6 +29,7 @@ interface KuberApi {
     @POST("brokers/connect") suspend fun connectBroker(@Body request: BrokerConnectRequestDto): BrokerConnectionDto
     @POST("analysis/analyze") suspend fun analyze(@Body request: AnalysisRequestDto): AnalysisResultDto
     @POST("demo/start") suspend fun startDemo(): DemoSessionDto
+    @POST("market/refresh/{symbol}") suspend fun refreshMarket(@Path("symbol") symbol: String, @Body request: MarketRefreshDto): AnalysisResultDto
     @POST("backtest") suspend fun backtest(@Body request: BacktestRequestDto): BacktestResultDto
     @POST("alerts") suspend fun createAlert(@Body request: AlertRequestDto): AlertDto
     @POST("orders/paper") suspend fun paperOrder(@Body request: PaperOrderDto): OrderDto
@@ -106,6 +109,8 @@ data class DemoSessionDto(
     val analysis: AnalysisResultDto,
 )
 @Serializable
+data class MarketRefreshDto(val broker: String = "zerodha")
+@Serializable
 data class PaperOrderDto(val symbol: String, val side: String, val quantity: Int, val idempotency_key: String, val broker: String = "mock")
 @Serializable
 data class OrderDto(val order_id: String, val status: String, val broker: String, val mode: String)
@@ -122,7 +127,7 @@ object KuberApiFactory {
         return Retrofit.Builder()
             .baseUrl(normalized)
             .client(client)
-            .addConverterFactory(Json { ignoreUnknownKeys = true }.asConverterFactory("application/json".toMediaType()))
+            .addConverterFactory(kuberJson.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(KuberApi::class.java)
     }

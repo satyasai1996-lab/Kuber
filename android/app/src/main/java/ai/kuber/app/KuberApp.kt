@@ -3,10 +3,12 @@ package ai.kuber.app
 import ai.kuber.app.data.AnalysisResultDto
 import ai.kuber.app.data.DemoSessionDto
 import ai.kuber.app.data.KuberApiFactory
+import ai.kuber.app.data.MarketRefreshDto
 import ai.kuber.app.data.OptionContractDto
 import ai.kuber.app.data.PortfolioDto
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,10 +20,14 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +47,7 @@ private enum class KuberScreen(val label: String) {
     ALERTS("Alerts"), BROKER("Broker"), SETTINGS("Settings"),
 }
 /** Kuber is API-driven: authoritative analysis and orders stay in the backend. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KuberApp() {
     var activeScreen by remember { mutableStateOf(KuberScreen.HOME) }
@@ -48,10 +55,22 @@ fun KuberApp() {
     var demo by remember { mutableStateOf<DemoSessionDto?>(null) }
 
     MaterialTheme {
-        Scaffold { padding ->
+        Scaffold(
+            topBar = { TopAppBar(title = { Text("Kuber · ${activeScreen.label}") }) },
+        ) { padding ->
             Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-                when (activeScreen) {
-                    KuberScreen.HOME -> HomeScreen(endpoint, { endpoint = it }, { demo = it })
+                ScrollableTabRow(selectedTabIndex = KuberScreen.entries.indexOf(activeScreen)) {
+                    KuberScreen.entries.forEach { screen ->
+                        Tab(
+                            selected = activeScreen == screen,
+                            onClick = { activeScreen = screen },
+                            text = { Text(screen.label) },
+                        )
+                    }
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    when (activeScreen) {
+                    KuberScreen.HOME -> HomeScreen(endpoint, demo, { endpoint = it }, { demo = it })
                     KuberScreen.ANALYSIS -> AnalysisScreen(demo?.analysis)
                     KuberScreen.GAMMA -> GammaScreen(demo)
                     KuberScreen.OPTIONS -> OptionsScreen(demo?.options)
@@ -61,12 +80,6 @@ fun KuberApp() {
                     KuberScreen.BROKER -> BrokerConnectScreen(endpoint, { endpoint = it }, { demo = it })
                     KuberScreen.BACKTEST -> BacktestScreen(demo?.analysis)
                     KuberScreen.SETTINGS -> SettingsScreen()
-                }
-                LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.weight(1f)) {
-                    items(KuberScreen.entries) { screen ->
-                        Card(onClick = { activeScreen = screen }, modifier = Modifier.padding(6.dp)) {
-                            Text(screen.label, modifier = Modifier.padding(12.dp))
-                        }
                     }
                 }
             }
@@ -75,7 +88,7 @@ fun KuberApp() {
 }
 
 @Composable
-private fun HomeScreen(endpoint: String, onEndpointChange: (String) -> Unit, onDemoStarted: (DemoSessionDto) -> Unit) {
+private fun HomeScreen(endpoint: String, demo: DemoSessionDto?, onEndpointChange: (String) -> Unit, onDemoStarted: (DemoSessionDto) -> Unit) {
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf("Start a safe demo or configure a broker from the Broker tab.") }
     Column(modifier = Modifier.padding(16.dp)) {
@@ -105,6 +118,27 @@ private fun HomeScreen(endpoint: String, onEndpointChange: (String) -> Unit, onD
             },
             modifier = Modifier.padding(top = 8.dp),
         ) { Text("Start safe paper demo") }
+        Button(
+            enabled = endpoint.startsWith("https://") || endpoint.startsWith("http://"),
+            onClick = {
+                scope.launch {
+                    status = "Refreshing connected Zerodha data…"
+                    runCatching { KuberApiFactory.create(endpoint).refreshMarket("NIFTY", MarketRefreshDto()) }
+                        .onSuccess { result -> status = "Live broker snapshot refreshed: ${result.final_bias}. Open Analysis for all seven bot results." }
+                        .onFailure { error -> status = "Live refresh unavailable: ${error.message ?: "connect Zerodha first"}" }
+                }
+            },
+            modifier = Modifier.padding(top = 8.dp),
+        ) { Text("Refresh connected market data") }
+        demo?.let { session ->
+            Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("${session.symbol} · ${session.source}", style = MaterialTheme.typography.titleMedium)
+                    Text("₹${"%.2f".format(session.quote.last_price)} · ${session.gex.regime} GEX · ${session.analysis.final_bias}")
+                    Text("${session.analysis.risk.approved.let { if (it) "Risk approved" else "Risk blocked" }} · data ${session.quote.timestamp}")
+                }
+            }
+        }
         Text(status, modifier = Modifier.padding(top = 8.dp))
     }
 }
