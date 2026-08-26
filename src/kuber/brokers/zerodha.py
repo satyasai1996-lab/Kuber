@@ -146,3 +146,9 @@ class ZerodhaOAuthConnector:
         if self._broker is None:
             raise RuntimeError("Zerodha has not completed OAuth on this backend")
         return self._broker
+
+    def instrument_master(self) -> tuple[dict[str, Any], ...]:
+        """Return the current provider master only after backend OAuth completes."""
+        if self._client is None:
+            raise RuntimeError("Zerodha has not completed OAuth on this backend")
+        return tuple(self._client.instruments())

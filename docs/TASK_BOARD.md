@@ -18,6 +18,8 @@ This is the active Kuber version of the supplied project-bot task board.
 
 ## Phase 1 — Authoritative backend core
 
+- [x] Canonical provider-backed NSE/BSE/MCX instrument catalogue and versioned search API
+- [ ] Populate the catalogue from controlled live broker master sync and persist the active version
 - [ ] Verify/reuse upstream market-intelligence and GEX implementation
 - [ ] Verify complete seven-agent debate, risk-veto and three-plan flow
 - [ ] Expose authenticated mobile REST/WebSocket contracts through FastAPI
@@ -29,6 +31,8 @@ This is the active Kuber version of the supplied project-bot task board.
 
 ## Phase 2 — Android API client
 
+- [x] Search UI for NIFTY/SENSEX/MCX instrument families with explicit exchange/segment labels
+- [ ] Replace the temporary bundled search list with `/api/v1/instruments/search` results
 - [x] Kotlin / Compose foundation
 - [ ] Home, AI Analysis, Gamma, Options and Trade Plan backed by API schemas
 - [ ] Portfolio, Alerts, Broker and Settings backed by API schemas

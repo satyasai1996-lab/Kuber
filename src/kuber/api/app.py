@@ -23,6 +23,7 @@ from kuber.brokers.kite_sandbox import KiteSandboxConnector
 from kuber.brokers.zerodha import ZerodhaOAuthConnector
 from kuber.config import KuberSettings
 from kuber.execution.service import BrokerRegistry, ExecutionService
+from kuber.instruments import InstrumentCatalog, normalize_zerodha_instruments
 from kuber.market.intelligence import SharedMarketIntelligence
 from kuber.market.normalizer import MarketDataNormalizer
 from kuber.market.streaming import MarketStreamBus
@@ -142,6 +143,7 @@ class KuberServices:
         self.latest_analysis_by_symbol: dict[str, Any] = {}
         self.alerts = AlertStore()
         self.stream = MarketStreamBus()
+        self.instruments = InstrumentCatalog()
         # Sandbox is intentionally not the default path. A real Kite connection
         # is available only when a backend deployment provides its own app key
         # and secret; none of those values exist in Android or this source tree.
@@ -228,6 +230,20 @@ class KuberServices:
             self.registry.register(connected_broker())
         return connection
 
+    def sync_instrument_catalog(self, broker: str) -> dict[str, Any]:
+        normalized = broker.lower().replace(" ", "_")
+        connector = self.broker_connections.connector(normalized)
+        loader = getattr(connector, "instrument_master", None)
+        if not callable(loader):
+            raise RuntimeError(f"{normalized} does not expose an instrument master")
+        rows = loader()
+        if normalized == "zerodha":
+            items = normalize_zerodha_instruments(rows)
+        else:
+            raise RuntimeError(f"{normalized} instrument normalization is not implemented")
+        version = self.instruments.replace(items)
+        return {"provider": normalized, "catalog_version": version, "count": len(items)}
+
 
 def create_app(services: KuberServices | None = None, settings: KuberSettings | None = None) -> FastAPI:
     app = FastAPI(title="Kuber API", version="v1", docs_url="/docs")
@@ -247,6 +263,35 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "kuber"}
+
+    @app.get("/api/v1/instruments/search")
+    def search_instruments(
+        q: str = "",
+        exchanges: str | None = None,
+        types: str | None = None,
+        limit: int = 25,
+    ) -> Any:
+        """Search the latest provider-backed catalogue without ambiguous symbol selection."""
+        exchange_filter = {item.strip().upper() for item in exchanges.split(",") if item.strip()} if exchanges else None
+        type_filter = {item.strip().upper() for item in types.split(",") if item.strip()} if types else None
+        try:
+            result = app.state.services.instruments.search(
+                q,
+                exchanges=exchange_filter,
+                instrument_types=type_filter,
+                limit=limit,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return _json(asdict(result))
+
+    @app.post("/api/v1/admin/instruments/sync/{broker}")
+    def sync_instruments(broker: str) -> Any:
+        """Atomically replace the catalogue from an authenticated backend connector."""
+        try:
+            return _json(app.state.services.sync_instrument_catalog(broker))
+        except (RuntimeError, ValueError) as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
 
     @app.post("/analysis/analyze")
     def analyze(request: AnalysisRequest) -> Any:
