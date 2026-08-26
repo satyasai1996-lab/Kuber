@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from kuber.ai.openai_decision import OpenAIDecisionService
 from kuber.agents.base import AgentContext
 from kuber.agents.coordinator import AnalysisCoordinator
 from kuber.alerts.service import AlertStore
@@ -117,7 +118,7 @@ class BrokerConnectPayload(BaseModel):
 
 
 class KuberServices:
-    def __init__(self) -> None:
+    def __init__(self, settings: KuberSettings | None = None, openai_decision: OpenAIDecisionService | None = None) -> None:
         self.normalizer = MarketDataNormalizer()
         self.intelligence = SharedMarketIntelligence()
         self.coordinator = AnalysisCoordinator()
@@ -129,6 +130,10 @@ class KuberServices:
         # The only preconfigured external connector is Zerodha's official demo
         # sandbox. It is isolated from production accounts and live execution.
         self.broker_connections = BrokerConnectionService({"zerodha_sandbox": KiteSandboxConnector()})
+        configured_settings = settings or KuberSettings.from_environment()
+        self.openai_decision = openai_decision or OpenAIDecisionService(
+            configured_settings.openai_api_key, configured_settings.openai_model,
+        )
 
     def prepare(self, request: AnalysisRequest):
         quote = self.normalizer.normalize_quote(request.symbol, request.quote.model_dump(), request.quote.source)
@@ -141,8 +146,8 @@ class KuberServices:
 
 def create_app(services: KuberServices | None = None, settings: KuberSettings | None = None) -> FastAPI:
     app = FastAPI(title="Kuber API", version="v1", docs_url="/docs")
-    app.state.services = services or KuberServices()
     app.state.settings = settings or KuberSettings.from_environment()
+    app.state.services = services or KuberServices(settings=app.state.settings)
 
     @app.middleware("http")
     async def token_auth(request: Request, call_next):
@@ -186,6 +191,21 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
         if result is None:
             raise HTTPException(status_code=404, detail="analysis not found; submit normalized provider data first")
         return _json(asdict(result))
+
+    @app.post("/analysis/openai-opinion/{symbol}")
+    def openai_opinion(symbol: str) -> Any:
+        """Optional ChatGPT opinion over Kuber's validated snapshot only.
+
+        This never bypasses the deterministic seven-agent scorecard, risk veto,
+        or the separate live-order confirmation flow.
+        """
+        result = app.state.services.latest_analysis_by_symbol.get(symbol.upper())
+        if result is None:
+            raise HTTPException(status_code=404, detail="analysis not found; submit validated provider data first")
+        try:
+            return _json(asdict(app.state.services.openai_decision.assess(result)))
+        except RuntimeError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
 
     @app.get("/analysis/gex/{symbol}")
     def get_gex(symbol: str) -> Any:

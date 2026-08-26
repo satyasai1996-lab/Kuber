@@ -38,10 +38,7 @@ fun KuberApp() {
         Scaffold { padding ->
             Column(modifier = Modifier.padding(padding)) {
                 if (activeScreen == KuberScreen.BROKER) {
-                    BrokerConnectScreen { _, _ ->
-                        // The networking layer submits transient fields over HTTPS and clears them.
-                        // No broker credential is written to Android storage.
-                    }
+                    BrokerConnectScreen()
                 } else {
                     KuberScreenPlaceholder(activeScreen)
                 }
@@ -87,6 +84,6 @@ private fun screenDescription(screen: KuberScreen): String = when (screen) {
     KuberScreen.PORTFOLIO -> "Broker-normalized holdings, positions, P&L, margin, and exposure."
     KuberScreen.BACKTEST -> "No-lookahead backtests over risk-approved AI-bot signals only."
     KuberScreen.ALERTS -> "Price, GEX regime, Gamma Flip, options-anomaly, and AI-decision alerts."
-    KuberScreen.BROKER -> "Paper, Angel One, Zerodha, and Fyers. Credentials are entered only for a one-time secure hand-off and are then cleared."
+    KuberScreen.BROKER -> "LAN trial: connect the Zerodha demo sandbox to this laptop. Real-money broker orders remain locked."
     KuberScreen.SETTINGS -> "Risk limits, AI provider selection, notification preferences, and secure session controls."
 }

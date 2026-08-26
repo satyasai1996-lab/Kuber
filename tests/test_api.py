@@ -64,3 +64,9 @@ class ApiTests(unittest.TestCase):
     def test_broker_connect_never_exposes_unconfigured_gateway(self) -> None:
         response = self.client.post("/brokers/connect", json={"broker": "angel_one", "credentials": {"api_key": "temporary", "client_id": "user"}})
         self.assertEqual(response.status_code, 503)
+
+    def test_openai_opinion_requires_backend_key_and_existing_analysis(self) -> None:
+        self.client.post("/analysis/analyze", json=PAYLOAD)
+        response = self.client.post("/analysis/openai-opinion/NIFTY")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("OPENAI_API_KEY", response.json()["detail"])

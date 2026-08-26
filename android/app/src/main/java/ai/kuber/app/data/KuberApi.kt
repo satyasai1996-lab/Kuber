@@ -22,6 +22,7 @@ interface KuberApi {
     @GET("portfolio") suspend fun portfolio(): PortfolioDto
     @GET("alerts") suspend fun alerts(): List<AlertDto>
     @GET("analysis/latest/{symbol}") suspend fun latestAnalysis(@Path("symbol") symbol: String): AnalysisResultDto
+    @GET("brokers/zerodha/sandbox/login-url") suspend fun zerodhaSandboxLogin(): ZerodhaSandboxLoginDto
     @POST("brokers/connect") suspend fun connectBroker(@Body request: BrokerConnectRequestDto): BrokerConnectionDto
     @POST("analysis/analyze") suspend fun analyze(@Body request: AnalysisRequestDto): AnalysisResultDto
     @POST("backtest") suspend fun backtest(@Body request: BacktestRequestDto): BacktestResultDto
@@ -77,6 +78,8 @@ data class AlertDto(val alert_id: String, val symbol: String, val kind: String, 
 data class BrokerConnectRequestDto(val broker: String, val credentials: JsonObject)
 @Serializable
 data class BrokerConnectionDto(val broker: String, val connection_reference: String, val status: String)
+@Serializable
+data class ZerodhaSandboxLoginDto(val broker: String, val environment: String, val login_url: String)
 @Serializable
 data class PaperOrderDto(val symbol: String, val side: String, val quantity: Int, val idempotency_key: String, val broker: String = "mock")
 @Serializable
