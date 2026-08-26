@@ -1,6 +1,7 @@
 package ai.kuber.app
 
 import ai.kuber.app.data.BrokerConnectRequestDto
+import ai.kuber.app.data.DemoSessionDto
 import ai.kuber.app.data.KuberApiFactory
 import android.annotation.SuppressLint
 import android.graphics.Color
@@ -28,82 +29,97 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-private const val DEFAULT_LAN_ENDPOINT = "http://192.168.31.75:8000"
-
 /**
- * Direct sandbox login flow. Zerodha renders its own login and 2FA page inside
- * Kuber. The APK never sees or stores a password, PIN, API secret, or an
- * access token; it sends only the short-lived callback token to the laptop.
+ * Real Kite OAuth flow. Zerodha renders its own login and 2FA page inside
+ * Kuber. The APK never sees or stores a password, PIN, API secret, or access
+ * token; it sends only the short-lived callback token to the Kuber backend.
  */
 @Composable
-fun BrokerConnectScreen() {
+fun BrokerConnectScreen(
+    endpoint: String,
+    onEndpointChange: (String) -> Unit,
+    onDemoStarted: (DemoSessionDto) -> Unit,
+) {
     val scope = rememberCoroutineScope()
-    var endpoint by remember { mutableStateOf(DEFAULT_LAN_ENDPOINT) }
     var loginUrl by remember { mutableStateOf<String?>(null) }
-    var status by remember { mutableStateOf("Laptop trial endpoint ready. Demo orders only.") }
+    var status by remember { mutableStateOf("Start paper demo, or connect your own Zerodha Kite app.") }
 
-    fun connectSandbox(requestToken: String) {
+    fun connectZerodha(requestToken: String) {
         scope.launch {
             loginUrl = null
             status = "Connecting demo session…"
             runCatching {
                 KuberApiFactory.create(endpoint).connectBroker(
                     BrokerConnectRequestDto(
-                        broker = "zerodha_sandbox",
+                        broker = "zerodha",
                         credentials = buildJsonObject { put("request_token", requestToken) },
                     ),
                 )
             }.onSuccess { connection ->
-                status = "Demo connected: ${connection.connection_reference}. No real-money orders."
+                status = "Zerodha connected: ${connection.connection_reference}. Live orders remain controlled."
             }.onFailure { error ->
-                status = "Demo connection failed: ${error.message ?: "check laptop Wi-Fi and retry login"}"
+                status = "Zerodha connection failed: ${error.message ?: "check backend configuration and retry login"}"
             }
         }
     }
 
     loginUrl?.let { url ->
         Column(modifier = Modifier.fillMaxSize()) {
-            Text("Sign in to Zerodha demo", modifier = Modifier.padding(16.dp))
+            Text("Sign in to Zerodha", modifier = Modifier.padding(16.dp))
             Text("Your credentials and 2FA are entered only on Zerodha's page.", modifier = Modifier.padding(horizontal = 16.dp))
-            ZerodhaSandboxWebView(
+            ZerodhaWebView(
                 loginUrl = url,
-                onRequestToken = ::connectSandbox,
+                onRequestToken = ::connectZerodha,
                 modifier = Modifier.weight(1f),
             )
-            Button(onClick = { loginUrl = null }, modifier = Modifier.padding(16.dp)) { Text("Cancel demo login") }
+            Button(onClick = { loginUrl = null }, modifier = Modifier.padding(16.dp)) { Text("Cancel Zerodha login") }
         }
         return
     }
 
     Column(modifier = Modifier.padding(16.dp)) {
-        Text("Zerodha demo sandbox — LAN trial")
-        Text("Real-money orders are locked. Keep the phone and laptop on the same Wi-Fi.")
+        Text("Broker and paper-trading setup")
+        Text("The broker key and secret belong only on your Kuber backend. The APK never stores them.")
         OutlinedTextField(
             value = endpoint,
-            onValueChange = { endpoint = it.trimEnd('/') },
-            label = { Text("Kuber laptop endpoint") },
+            onValueChange = { onEndpointChange(it.trimEnd('/')) },
+            label = { Text("Kuber HTTPS API endpoint") },
             modifier = Modifier.fillMaxWidth(),
         )
         Button(
-            enabled = endpoint.startsWith("http://"),
+            enabled = endpoint.startsWith("https://") || endpoint.startsWith("http://"),
             onClick = {
                 scope.launch {
-                    status = "Opening Zerodha demo login…"
-                    runCatching { KuberApiFactory.create(endpoint).zerodhaSandboxLogin().login_url }
+                    status = "Opening your Zerodha Kite login…"
+                    runCatching { KuberApiFactory.create(endpoint).zerodhaLogin().login_url }
                         .onSuccess { url -> loginUrl = url }
                         .onFailure { error ->
-                            status = "Cannot reach Kuber laptop: ${error.message ?: "check Wi-Fi"}"
+                            status = "Cannot start Zerodha login: ${error.message ?: "configure the Kuber backend first"}"
                         }
                 }
             },
-        ) { Text("Sign in to Zerodha demo") }
+        ) { Text("Connect Zerodha") }
+        Button(
+            enabled = endpoint.startsWith("https://") || endpoint.startsWith("http://"),
+            onClick = {
+                scope.launch {
+                    status = "Starting fixture-backed paper demo…"
+                    runCatching { KuberApiFactory.create(endpoint).startDemo() }
+                        .onSuccess { demo ->
+                            onDemoStarted(demo)
+                            status = "Paper demo ready. Its source is clearly labelled demo_fixture."
+                        }
+                        .onFailure { error -> status = "Cannot start paper demo: ${error.message ?: "check API endpoint"}" }
+                }
+            },
+            modifier = Modifier.padding(top = 8.dp),
+        ) { Text("Start safe paper demo") }
         Text(status, modifier = Modifier.padding(top = 12.dp))
     }
 }
-
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun ZerodhaSandboxWebView(loginUrl: String, onRequestToken: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun ZerodhaWebView(loginUrl: String, onRequestToken: (String) -> Unit, modifier: Modifier = Modifier) {
     AndroidView(
         modifier = modifier,
         factory = { context ->

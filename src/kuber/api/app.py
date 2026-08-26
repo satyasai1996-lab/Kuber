@@ -18,6 +18,7 @@ from kuber.backtest.engine import BacktestConfig, BotSignalBacktester
 from kuber.brokers.mock import MockBroker
 from kuber.brokers.connection import BrokerConnectionService
 from kuber.brokers.kite_sandbox import KiteSandboxConnector
+from kuber.brokers.zerodha import ZerodhaOAuthConnector
 from kuber.config import KuberSettings
 from kuber.execution.service import BrokerRegistry, ExecutionService
 from kuber.market.intelligence import SharedMarketIntelligence
@@ -119,6 +120,8 @@ class BrokerConnectPayload(BaseModel):
 
 class KuberServices:
     def __init__(self, settings: KuberSettings | None = None, openai_decision: OpenAIDecisionService | None = None) -> None:
+        configured_settings = settings or KuberSettings.from_environment()
+        self.settings = configured_settings
         self.normalizer = MarketDataNormalizer()
         self.intelligence = SharedMarketIntelligence()
         self.coordinator = AnalysisCoordinator()
@@ -127,10 +130,17 @@ class KuberServices:
         self.analyses: dict[str, Any] = {}
         self.latest_analysis_by_symbol: dict[str, Any] = {}
         self.alerts = AlertStore()
-        # The only preconfigured external connector is Zerodha's official demo
-        # sandbox. It is isolated from production accounts and live execution.
-        self.broker_connections = BrokerConnectionService({"zerodha_sandbox": KiteSandboxConnector()})
-        configured_settings = settings or KuberSettings.from_environment()
+        # Sandbox is intentionally not the default path. A real Kite connection
+        # is available only when a backend deployment provides its own app key
+        # and secret; none of those values exist in Android or this source tree.
+        connectors: dict[str, Any] = {"zerodha_sandbox": KiteSandboxConnector()}
+        if configured_settings.zerodha_api_key and configured_settings.zerodha_api_secret:
+            connectors["zerodha"] = ZerodhaOAuthConnector(
+                configured_settings.zerodha_api_key,
+                configured_settings.zerodha_api_secret,
+                live_enabled=configured_settings.live_orders_enabled,
+            )
+        self.broker_connections = BrokerConnectionService(connectors)
         self.openai_decision = openai_decision or OpenAIDecisionService(
             configured_settings.openai_api_key, configured_settings.openai_model,
         )
@@ -142,6 +152,49 @@ class KuberServices:
         mock = MockBroker(quote=quote, option_chain=options)
         self.registry.register(mock)
         return intelligence
+
+    def start_demo(self):
+        """Create a visible, strictly paper-only fixture session.
+
+        It allows a new Android installation to exercise the complete bot →
+        risk → trade-plan → paper-order workflow without pretending it has
+        broker or live market data.
+        """
+        request = AnalysisRequest(
+            symbol="NIFTY",
+            quote=QuotePayload(last_price=22_000, vwap=21_965, volume=1_500_000, source="demo_fixture"),
+            options=[
+                OptionPayload(strike=21_800, expiry="2026-08-27", option_type="CE", open_interest=100_000, implied_volatility=14.1, gamma=0.009, last_price=235, lot_size=25, volume=42_000),
+                OptionPayload(strike=21_900, expiry="2026-08-27", option_type="CE", open_interest=120_000, implied_volatility=13.8, gamma=0.015, last_price=168, lot_size=25, volume=54_000),
+                OptionPayload(strike=22_000, expiry="2026-08-27", option_type="CE", open_interest=165_000, implied_volatility=13.5, gamma=0.022, last_price=111, lot_size=25, volume=69_000),
+                OptionPayload(strike=22_000, expiry="2026-08-27", option_type="PE", open_interest=142_000, implied_volatility=14.2, gamma=0.022, last_price=105, lot_size=25, volume=65_000),
+                OptionPayload(strike=22_100, expiry="2026-08-27", option_type="PE", open_interest=180_000, implied_volatility=14.9, gamma=0.016, last_price=160, lot_size=25, volume=58_000),
+                OptionPayload(strike=22_200, expiry="2026-08-27", option_type="PE", open_interest=145_000, implied_volatility=15.6, gamma=0.010, last_price=230, lot_size=25, volume=39_000),
+            ],
+            fundamentals={"quality_score": 15},
+            news_bias=8,
+            sentiment_score=10,
+            sector_score=6,
+        )
+        intelligence = self.prepare(request)
+        result = self.coordinator.analyze(AgentContext(
+            intelligence=intelligence,
+            fundamentals=request.fundamentals,
+            news_bias=request.news_bias,
+            sentiment_score=request.sentiment_score,
+            sector_score=request.sector_score,
+        ))
+        self.analyses[result.analysis_id] = result
+        self.latest_analysis_by_symbol["NIFTY"] = result
+        return result
+
+    def connect_broker(self, broker: str, credentials: dict[str, str]):
+        connection = self.broker_connections.connect(broker, credentials)
+        connector = self.broker_connections.connector(connection.broker)
+        connected_broker = getattr(connector, "connected_broker", None)
+        if callable(connected_broker):
+            self.registry.register(connected_broker())
+        return connection
 
 
 def create_app(services: KuberServices | None = None, settings: KuberSettings | None = None) -> FastAPI:
@@ -173,6 +226,21 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
         app.state.services.analyses[result.analysis_id] = result
         app.state.services.latest_analysis_by_symbol[result.intelligence.quote.symbol] = result
         return _json(asdict(result))
+
+    @app.post("/demo/start")
+    def start_demo() -> Any:
+        result = app.state.services.start_demo()
+        intelligence = result.intelligence
+        return _json({
+            "mode": "PAPER_DEMO",
+            "symbol": intelligence.quote.symbol,
+            "source": "demo_fixture",
+            "notice": "This is fixture data for paper-trading workflow validation, not live market data.",
+            "quote": asdict(intelligence.quote),
+            "gex": asdict(intelligence.snapshot),
+            "options": [asdict(contract) for contract in intelligence.option_chain],
+            "analysis": asdict(result),
+        })
 
     @app.post("/analysis/deep-analyze")
     def deep_analyze(request: AnalysisRequest) -> Any:
@@ -269,7 +337,7 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
         # Do not log this payload. The connection service clears it after the
         # deployment connector has exchanged it for a server-side reference.
         try:
-            connection = app.state.services.broker_connections.connect(payload.broker, dict(payload.credentials))
+            connection = app.state.services.connect_broker(payload.broker, dict(payload.credentials))
             return _json(asdict(connection))
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
@@ -283,6 +351,34 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
             "environment": "demo_only",
             "login_url": app.state.services.broker_connections.login_url("zerodha_sandbox"),
         }
+
+    @app.get("/brokers/zerodha/login-url")
+    def zerodha_login_url() -> dict[str, str]:
+        """Start a real user-owned Kite OAuth flow configured on this backend."""
+        try:
+            return {
+                "broker": "zerodha",
+                "environment": "production_oauth",
+                "login_url": app.state.services.broker_connections.login_url("zerodha"),
+            }
+        except RuntimeError as error:
+            raise HTTPException(
+                status_code=503,
+                detail="Zerodha is not configured on this backend. Set KUBER_ZERODHA_API_KEY and KUBER_ZERODHA_API_SECRET outside the APK.",
+            ) from error
+
+    @app.get("/brokers/zerodha/callback")
+    def zerodha_callback(request_token: str) -> dict[str, str]:
+        """Optional registered redirect endpoint for browser-based Kite OAuth."""
+        try:
+            connection = app.state.services.connect_broker("zerodha", {"request_token": request_token})
+            return {
+                "status": connection.status,
+                "broker": connection.broker,
+                "message": "Zerodha is connected. Return to Kuber and refresh Broker status.",
+            }
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
 
     @app.get("/portfolio")
     def portfolio() -> Any:

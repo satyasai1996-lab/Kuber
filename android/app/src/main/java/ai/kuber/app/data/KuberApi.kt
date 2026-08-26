@@ -23,17 +23,29 @@ interface KuberApi {
     @GET("alerts") suspend fun alerts(): List<AlertDto>
     @GET("analysis/latest/{symbol}") suspend fun latestAnalysis(@Path("symbol") symbol: String): AnalysisResultDto
     @GET("brokers/zerodha/sandbox/login-url") suspend fun zerodhaSandboxLogin(): ZerodhaSandboxLoginDto
+    @GET("brokers/zerodha/login-url") suspend fun zerodhaLogin(): BrokerLoginDto
     @POST("brokers/connect") suspend fun connectBroker(@Body request: BrokerConnectRequestDto): BrokerConnectionDto
     @POST("analysis/analyze") suspend fun analyze(@Body request: AnalysisRequestDto): AnalysisResultDto
+    @POST("demo/start") suspend fun startDemo(): DemoSessionDto
     @POST("backtest") suspend fun backtest(@Body request: BacktestRequestDto): BacktestResultDto
     @POST("alerts") suspend fun createAlert(@Body request: AlertRequestDto): AlertDto
     @POST("orders/paper") suspend fun paperOrder(@Body request: PaperOrderDto): OrderDto
 }
-
 @Serializable
 data class QuoteDto(val symbol: String, val last_price: Double, val timestamp: String, val source: String)
 @Serializable
-data class GexSnapshotDto(val snapshot_id: String, val symbol: String, val spot: Double, val gamma_flip: Double?, val regime: String, val timestamp: String)
+data class GexSnapshotDto(
+    val snapshot_id: String,
+    val symbol: String,
+    val spot: Double,
+    val gamma_flip: Double?,
+    val regime: String,
+    val timestamp: String,
+    val total_gex: Double = 0.0,
+    val gamma_walls: List<Double> = emptyList(),
+    val expiry_set: List<String> = emptyList(),
+    val source: String = "unknown",
+)
 @Serializable
 data class OptionContractDto(val underlying: String, val strike: Double, val expiry: String, val option_type: String, val open_interest: Int, val implied_volatility: Double, val gamma: Double, val last_price: Double, val lot_size: Int, val volume: Int)
 @Serializable
@@ -80,6 +92,19 @@ data class BrokerConnectRequestDto(val broker: String, val credentials: JsonObje
 data class BrokerConnectionDto(val broker: String, val connection_reference: String, val status: String)
 @Serializable
 data class ZerodhaSandboxLoginDto(val broker: String, val environment: String, val login_url: String)
+@Serializable
+data class BrokerLoginDto(val broker: String, val environment: String, val login_url: String)
+@Serializable
+data class DemoSessionDto(
+    val mode: String,
+    val symbol: String,
+    val source: String,
+    val notice: String,
+    val quote: QuoteDto,
+    val gex: GexSnapshotDto,
+    val options: List<OptionContractDto>,
+    val analysis: AnalysisResultDto,
+)
 @Serializable
 data class PaperOrderDto(val symbol: String, val side: String, val quantity: Int, val idempotency_key: String, val broker: String = "mock")
 @Serializable

@@ -19,8 +19,8 @@ class ConfigTests(unittest.TestCase):
             if previous_token is None: os.environ.pop("KUBER_API_TOKEN", None)
             else: os.environ["KUBER_API_TOKEN"] = previous_token
 
-    def test_live_orders_require_https_and_static_ipv4(self) -> None:
-        keys = ("KUBER_ENVIRONMENT", "KUBER_API_TOKEN", "KUBER_ENABLE_LIVE_ORDERS", "KUBER_PUBLIC_BASE_URL", "KUBER_ANGEL_ONE_STATIC_IPV4")
+    def test_live_orders_require_production_and_https(self) -> None:
+        keys = ("KUBER_ENVIRONMENT", "KUBER_API_TOKEN", "KUBER_ENABLE_LIVE_ORDERS", "KUBER_PUBLIC_BASE_URL", "KUBER_ANGEL_ONE_STATIC_IPV4", "KUBER_ENABLE_ANGEL_ONE_LIVE")
         previous = {key: os.environ.get(key) for key in keys}
         try:
             os.environ["KUBER_ENVIRONMENT"] = "production"
@@ -29,6 +29,24 @@ class ConfigTests(unittest.TestCase):
             os.environ.pop("KUBER_PUBLIC_BASE_URL", None)
             os.environ.pop("KUBER_ANGEL_ONE_STATIC_IPV4", None)
             with self.assertRaises(RuntimeError):
+                KuberSettings.from_environment()
+        finally:
+            for key, value in previous.items():
+                if value is None: os.environ.pop(key, None)
+                else: os.environ[key] = value
+    def test_angel_one_alone_requires_a_static_ipv4(self) -> None:
+        keys = ("KUBER_ENVIRONMENT", "KUBER_API_TOKEN", "KUBER_ENABLE_LIVE_ORDERS", "KUBER_PUBLIC_BASE_URL", "KUBER_ANGEL_ONE_STATIC_IPV4", "KUBER_ENABLE_ANGEL_ONE_LIVE")
+        previous = {key: os.environ.get(key) for key in keys}
+        try:
+            os.environ.update({
+                "KUBER_ENVIRONMENT": "production",
+                "KUBER_API_TOKEN": "test-token",
+                "KUBER_ENABLE_LIVE_ORDERS": "true",
+                "KUBER_PUBLIC_BASE_URL": "https://api.example.com",
+                "KUBER_ENABLE_ANGEL_ONE_LIVE": "true",
+            })
+            os.environ.pop("KUBER_ANGEL_ONE_STATIC_IPV4", None)
+            with self.assertRaisesRegex(RuntimeError, "static IPv4"):
                 KuberSettings.from_environment()
         finally:
             for key, value in previous.items():

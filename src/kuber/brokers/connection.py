@@ -48,3 +48,11 @@ class BrokerConnectionService:
         if not callable(login_url):
             raise RuntimeError(f"{normalized} does not expose a configured login flow")
         return str(login_url())
+
+    def connector(self, broker: str) -> BrokerConnector:
+        """Expose a configured backend connector, never its submitted credentials."""
+        normalized = broker.lower().replace(" ", "_")
+        connector = self._connectors.get(normalized)
+        if connector is None:
+            raise RuntimeError(f"{normalized} gateway is not configured on this Kuber backend")
+        return connector

@@ -40,6 +40,17 @@ class ApiTests(unittest.TestCase):
         live = {**order, "idempotency_key": "api-live-123", "confirmed": False}
         self.assertEqual(self.client.post("/orders/live/confirm", json=live).status_code, 409)
 
+    def test_demo_starts_a_visible_paper_only_market_intelligence_session(self) -> None:
+        response = self.client.post("/demo/start")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["mode"], "PAPER_DEMO")
+        self.assertEqual(body["source"], "demo_fixture")
+        self.assertEqual(len(body["analysis"]["agents"]), 7)
+        self.assertEqual(body["gex"]["snapshot_id"], body["analysis"]["intelligence"]["snapshot"]["snapshot_id"])
+        paper = self.client.post("/orders/paper", json={"symbol": "NIFTY", "side": "BUY", "quantity": 1, "idempotency_key": "demo-paper-123"})
+        self.assertEqual(paper.status_code, 200)
+
     def test_creates_alert_with_supported_kind(self) -> None:
         response = self.client.post("/alerts", json={"symbol": "NIFTY", "kind": "GEX_REGIME", "condition": "NEGATIVE"})
         self.assertEqual(response.status_code, 200)
@@ -64,6 +75,11 @@ class ApiTests(unittest.TestCase):
     def test_broker_connect_never_exposes_unconfigured_gateway(self) -> None:
         response = self.client.post("/brokers/connect", json={"broker": "angel_one", "credentials": {"api_key": "temporary", "client_id": "user"}})
         self.assertEqual(response.status_code, 503)
+
+    def test_real_zerodha_login_requires_backend_configuration(self) -> None:
+        response = self.client.get("/brokers/zerodha/login-url")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("KUBER_ZERODHA_API_KEY", response.json()["detail"])
 
     def test_openai_opinion_requires_backend_key_and_existing_analysis(self) -> None:
         self.client.post("/analysis/analyze", json=PAYLOAD)
