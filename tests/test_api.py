@@ -75,6 +75,25 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(client.get("/brokers").status_code, 401)
         self.assertEqual(client.get("/brokers", headers={"Authorization": "Bearer test-token"}).status_code, 200)
 
+    def test_https_transport_headers_and_trusted_host_are_enforced(self) -> None:
+        settings = KuberSettings(
+            api_token="test-token",
+            environment="production",
+            public_base_url="https://api.kuber.test",
+            allowed_hosts=("api.kuber.test",),
+        )
+        client = TestClient(create_app(settings=settings), base_url="https://api.kuber.test")
+        response = client.get("/api/v1/instruments/status", headers={"Authorization": "Bearer test-token"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["strict-transport-security"], "max-age=31536000; includeSubDomains")
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+        self.assertEqual(client.get("/docs").status_code, 404)
+        self.assertEqual(client.get("/openapi.json").status_code, 404)
+
+        untrusted = TestClient(create_app(settings=settings), base_url="https://evil.example")
+        self.assertEqual(untrusted.get("/health").status_code, 400)
+
     def test_broker_connect_never_exposes_unconfigured_gateway(self) -> None:
         response = self.client.post("/brokers/connect", json={"broker": "angel_one", "credentials": {"api_key": "temporary", "client_id": "user"}})
         self.assertEqual(response.status_code, 503)

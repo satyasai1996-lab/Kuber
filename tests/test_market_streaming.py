@@ -34,3 +34,15 @@ class MarketStreamingTests(unittest.TestCase):
         with self.assertRaises(WebSocketDisconnect):
             with client.websocket_connect("/market/stream/NIFTY"):
                 pass
+
+    def test_websocket_accepts_authorization_header_but_rejects_query_token(self) -> None:
+        client = TestClient(create_app(settings=KuberSettings(api_token="test-token")))
+        with client.websocket_connect(
+            "/market/stream/NIFTY",
+            headers={"Authorization": "Bearer test-token"},
+        ) as socket:
+            self.assertEqual(socket.receive_json()["state"], "connected")
+
+        with self.assertRaises(WebSocketDisconnect):
+            with client.websocket_connect("/market/stream/NIFTY?token=test-token"):
+                pass

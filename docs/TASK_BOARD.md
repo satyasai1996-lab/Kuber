@@ -25,6 +25,7 @@ This is the active Kuber version of the supplied project-bot task board.
 - [ ] Verify the remaining upstream market-intelligence calculations and fixtures
 - [ ] Verify complete seven-agent debate, risk-veto and three-plan flow
 - [ ] Expose authenticated mobile REST/WebSocket contracts through FastAPI
+- [x] Enforce HTTPS-only Android transport and add authenticated runtime server verification
 - [ ] Verify broker abstraction and mock/paper lifecycle against upstream source
 - [ ] Verify and implement current Angel One and Fyers SDK adapters
 - [ ] Verify and integrate Zerodha option-chain and live quote data
@@ -47,6 +48,8 @@ This is the active Kuber version of the supplied project-bot task board.
 - [x] Unit, GEX, agent-schema, risk-gate, API and mock-order tests
 - [x] Zerodha OAuth boundary tests with an injected fake Kite client
 - [ ] Backend-to-Android contract and device verification
+- [x] Verify live trial HTTPS REST/auth and WSS through Cloudflare from the laptop and Android emulator
+- [ ] Repeat HTTPS acceptance on the physical Android device
 - [ ] Direct-mobile Zerodha option-chain and reconnect contract tests
 - [ ] Angel One and Fyers adapter acceptance tests against current provider requirements
 - [ ] Android device/UI acceptance tests

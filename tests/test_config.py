@@ -40,7 +40,7 @@ class ConfigTests(unittest.TestCase):
         try:
             os.environ.update({
                 "KUBER_ENVIRONMENT": "production",
-                "KUBER_API_TOKEN": "test-token",
+                "KUBER_API_TOKEN": "t" * 32,
                 "KUBER_ENABLE_LIVE_ORDERS": "true",
                 "KUBER_PUBLIC_BASE_URL": "https://api.example.com",
                 "KUBER_ENABLE_ANGEL_ONE_LIVE": "true",
@@ -48,6 +48,28 @@ class ConfigTests(unittest.TestCase):
             os.environ.pop("KUBER_ANGEL_ONE_STATIC_IPV4", None)
             with self.assertRaisesRegex(RuntimeError, "static IPv4"):
                 KuberSettings.from_environment()
+        finally:
+            for key, value in previous.items():
+                if value is None: os.environ.pop(key, None)
+                else: os.environ[key] = value
+
+    def test_production_requires_origin_only_https_url_and_long_token(self) -> None:
+        keys = ("KUBER_ENVIRONMENT", "KUBER_API_TOKEN", "KUBER_PUBLIC_BASE_URL", "KUBER_ALLOWED_HOSTS")
+        previous = {key: os.environ.get(key) for key in keys}
+        try:
+            os.environ.update({
+                "KUBER_ENVIRONMENT": "production",
+                "KUBER_API_TOKEN": "t" * 32,
+                "KUBER_PUBLIC_BASE_URL": "http://api.example.com/path?token=bad",
+            })
+            with self.assertRaisesRegex(RuntimeError, "origin-only HTTPS"):
+                KuberSettings.from_environment()
+
+            os.environ["KUBER_PUBLIC_BASE_URL"] = "https://api.example.com"
+            os.environ["KUBER_ALLOWED_HOSTS"] = "api.example.com,localhost"
+            settings = KuberSettings.from_environment()
+            self.assertEqual(settings.public_base_url, "https://api.example.com")
+            self.assertEqual(settings.allowed_hosts, ("api.example.com", "localhost"))
         finally:
             for key, value in previous.items():
                 if value is None: os.environ.pop(key, None)

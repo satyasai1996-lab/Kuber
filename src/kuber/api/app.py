@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 from dataclasses import asdict
 from datetime import datetime, timezone
 from enum import Enum
@@ -12,6 +13,7 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from kuber.ai.openai_decision import OpenAIDecisionService
 from kuber.agents.base import AgentContext
@@ -251,9 +253,29 @@ class KuberServices:
 
 
 def create_app(services: KuberServices | None = None, settings: KuberSettings | None = None) -> FastAPI:
-    app = FastAPI(title="Kuber API", version="v1", docs_url="/docs")
-    app.state.settings = settings or KuberSettings.from_environment()
+    runtime_settings = settings or KuberSettings.from_environment()
+    production = runtime_settings.environment.lower() == "production"
+    app = FastAPI(
+        title="Kuber API",
+        version="v1",
+        docs_url=None if production else "/docs",
+        openapi_url=None if production else "/openapi.json",
+    )
+    app.state.settings = runtime_settings
     app.state.services = services or KuberServices(settings=app.state.settings)
+    public_host = None
+    if app.state.settings.public_base_url:
+        from urllib.parse import urlsplit
+
+        public_host = urlsplit(app.state.settings.public_base_url).hostname
+    allowed_hosts = {
+        "127.0.0.1",
+        "localhost",
+        "testserver",
+        *(app.state.settings.allowed_hosts or ()),
+        *((public_host,) if public_host else ()),
+    }
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=sorted(allowed_hosts))
 
     @app.middleware("http")
     async def token_auth(request: Request, call_next):
@@ -261,9 +283,10 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
         # every data/execution endpoint; Android never receives broker credentials.
         token = app.state.settings.api_token
         if token and request.url.path not in {"/health", "/docs", "/openapi.json"}:
-            if request.headers.get("Authorization") != f"Bearer {token}":
+            supplied = request.headers.get("Authorization", "")
+            if not secrets.compare_digest(supplied, f"Bearer {token}"):
                 if request.url.path.startswith("/api/v1/"):
-                    return JSONResponse(
+                    response = JSONResponse(
                         _api_envelope(error={
                             "code": "unauthorized",
                             "message": "A valid Kuber session is required.",
@@ -272,8 +295,20 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
                         }),
                         status_code=401,
                     )
-                return JSONResponse({"detail": "unauthorized"}, status_code=401)
-        return await call_next(request)
+                else:
+                    response = JSONResponse({"detail": "unauthorized"}, status_code=401)
+            else:
+                response = await call_next(request)
+        else:
+            response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if request.url.path.startswith(("/api/", "/analysis", "/market", "/options", "/orders", "/portfolio", "/brokers", "/alerts", "/backtest")):
+            response.headers["Cache-Control"] = "no-store"
+        if request.url.scheme == "https" or request.headers.get("X-Forwarded-Proto", "").lower() == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -413,11 +448,11 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
             raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.websocket("/market/stream/{symbol}")
-    async def market_stream(websocket: WebSocket, symbol: str, token: str | None = None) -> None:
+    async def market_stream(websocket: WebSocket, symbol: str) -> None:
         """Authenticated quote fan-out with reconnect-safe latest-value replay."""
         expected = app.state.settings.api_token
-        supplied = websocket.headers.get("Authorization") or (f"Bearer {token}" if token else None)
-        if expected and supplied != f"Bearer {expected}":
+        supplied = websocket.headers.get("Authorization", "")
+        if expected and not secrets.compare_digest(supplied, f"Bearer {expected}"):
             await websocket.close(code=1008)
             return
         normalized = symbol.upper()

@@ -48,8 +48,13 @@ user password. When it is absent, the app labels its small bundled list as
 shortcuts with no price data. A real Zerodha catalogue becomes ready only after
 backend OAuth and the atomic `POST /api/v1/admin/instruments/sync/zerodha`
 operation succeed. The production mobile-session login flow is still a release
-gate; the global `KUBER_API_TOKEN` is development-only and is not embedded in
-the APK.
+gate; the global `KUBER_API_TOKEN` is a deployment-level bootstrap credential,
+not per-user production authentication, and is never embedded in the APK.
+
+For the laptop HTTPS trial and the persistent Cloudflare Tunnel upgrade, see
+[`docs/HTTPS_DEPLOYMENT.md`](docs/HTTPS_DEPLOYMENT.md). The trial URL and access
+token are entered under the Android **Safety** tab at runtime and are not
+compiled into or persisted by the APK.
 
 ## Project layout
 

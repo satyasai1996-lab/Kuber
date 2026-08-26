@@ -1,0 +1,11 @@
+# Persistent production template. Never commit the real tunnel UUID or credentials file.
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: C:\secure\cloudflared\REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  - hostname: api.your-domain.example
+    service: http://127.0.0.1:8000
+    originRequest:
+      connectTimeout: 10s
+      noHappyEyeballs: false
+  - service: http_status:404
