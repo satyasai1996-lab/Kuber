@@ -40,3 +40,14 @@ class ApiTests(unittest.TestCase):
         response = self.client.post("/alerts", json={"symbol": "NIFTY", "kind": "GEX_REGIME", "condition": "NEGATIVE"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["kind"], "GEX_REGIME")
+
+    def test_backtest_accepts_risk_approved_ai_signal(self) -> None:
+        candles = [
+            {"timestamp": "2026-01-01T00:00:00Z", "open": 100, "high": 102, "low": 99, "close": 101},
+            {"timestamp": "2026-01-02T00:00:00Z", "open": 105, "high": 108, "low": 104, "close": 107},
+            {"timestamp": "2026-01-03T00:00:00Z", "open": 110, "high": 112, "low": 109, "close": 111},
+        ]
+        signals = [{"timestamp": "2026-01-01T00:00:00Z", "bias": "BULLISH", "confidence": 80, "risk_approved": True, "rationale": ["validated bot consensus"]}]
+        response = self.client.post("/backtest", json={"candles": candles, "signals": signals, "initial_capital": 1000, "allocation_percent": 100, "transaction_cost_bps": 0})
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(response.json()["total_return_percent"], 0)

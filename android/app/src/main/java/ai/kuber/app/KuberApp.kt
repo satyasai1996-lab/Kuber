@@ -3,9 +3,13 @@ package ai.kuber.app
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -15,41 +19,55 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 
 private enum class KuberScreen(val label: String) {
-    HOME("Home"), ANALYSIS("AI Analysis"), GAMMA("Gamma"), OPTIONS("Options"), TRADE_PLAN("Trade Plan"), PORTFOLIO("Portfolio")
+    HOME("Home"), ANALYSIS("AI Analysis"), GAMMA("Gamma"), OPTIONS("Options"),
+    TRADE_PLAN("Trade Plan"), PORTFOLIO("Portfolio"), BACKTEST("Backtest"),
+    ALERTS("Alerts"), BROKER("Broker"), SETTINGS("Settings")
 }
 
 @Composable
 fun KuberApp() {
     var activeScreen by remember { mutableStateOf(KuberScreen.HOME) }
     MaterialTheme {
-        Scaffold(
-            bottomBar = {
-                NavigationBar {
-                    KuberScreen.entries.forEach { screen ->
-                        NavigationBarItem(
-                            selected = activeScreen == screen,
-                            onClick = { activeScreen = screen },
-                            icon = { Text(screen.label.take(1)) },
-                            label = { Text(screen.label) },
-                        )
+        Scaffold { padding ->
+            Column(modifier = Modifier.padding(padding)) {
+                KuberScreenPlaceholder(activeScreen)
+                LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.weight(1f)) {
+                    items(KuberScreen.entries) { screen ->
+                        Card(onClick = { activeScreen = screen }, modifier = Modifier.padding(8.dp)) {
+                            Text(screen.label, modifier = Modifier.padding(16.dp))
+                        }
                     }
                 }
-            },
-        ) { _ -> KuberScreenPlaceholder(activeScreen) }
+            }
+        }
     }
 }
 
 @Composable
 private fun KuberScreenPlaceholder(screen: KuberScreen) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("Kuber", style = MaterialTheme.typography.headlineMedium)
         Text(screen.label, style = MaterialTheme.typography.titleLarge)
-        Text("Data is loaded only through the Kuber API; broker secrets stay on the backend.")
+        Text(screenDescription(screen))
     }
+}
+
+private fun screenDescription(screen: KuberScreen): String = when (screen) {
+    KuberScreen.HOME -> "NIFTY/BANKNIFTY watchlist, market regime, alerts, and P&L."
+    KuberScreen.ANALYSIS -> "Seven analyst cards, scorecard, conflicts, debate, fund-manager decision, and risk veto."
+    KuberScreen.GAMMA -> "Shared validated GEX curve, Gamma Flip, regime, walls, expiry, source, and timestamp."
+    KuberScreen.OPTIONS -> "Option chain, OI, volume, IV, Greeks, PCR, and anomalies."
+    KuberScreen.TRADE_PLAN -> "Aggressive, neutral, and conservative paper plans; live order needs separate confirmation."
+    KuberScreen.PORTFOLIO -> "Broker-normalized holdings, positions, P&L, margin, and exposure."
+    KuberScreen.BACKTEST -> "No-lookahead backtests over risk-approved AI-bot signals only."
+    KuberScreen.ALERTS -> "Price, GEX regime, Gamma Flip, options-anomaly, and AI-decision alerts."
+    KuberScreen.BROKER -> "Paper, Angel One, Zerodha, and Fyers status. Credentials never enter the app."
+    KuberScreen.SETTINGS -> "Risk limits, AI provider selection, notification preferences, and secure session controls."
 }
