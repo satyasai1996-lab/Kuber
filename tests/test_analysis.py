@@ -2,6 +2,7 @@ import unittest
 
 from kuber.agents.base import AgentContext
 from kuber.agents.coordinator import AnalysisCoordinator
+from kuber.agents.validation import AnalysisValidationBot
 from kuber.market.intelligence import SharedMarketIntelligence
 from kuber.market.normalizer import MarketDataNormalizer
 from kuber.models import AgentName, Bias
@@ -31,6 +32,8 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(result.risk.approved)
         self.assertEqual(result.final_bias, Bias.BULLISH)
         self.assertEqual(len(result.trade_plans), 3)
+        validation = AnalysisValidationBot().validate(result)
+        self.assertTrue(validation.valid)
 
     def test_stale_gex_is_a_risk_veto(self) -> None:
         state = intelligence()

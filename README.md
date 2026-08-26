@@ -40,6 +40,8 @@ On Windows, use `.venv\\Scripts\\python.exe` instead.
 - `src/kuber/risk/`: position sizing, freshness checks, and veto decisions.
 - `src/kuber/brokers/`: common broker contract and safe paper broker.
 - `src/kuber/execution/`: idempotent execution gate and audit trail.
+- `src/kuber/backtest/`: no-lookahead paper backtesting over validated AI-bot signals.
+- `src/kuber/alerts/`: server-side alert-rule contracts.
 - `src/kuber/api/`: Android-facing FastAPI contract.
 - `android/`: Kotlin/Compose client skeleton and API boundary.
 - `docs/source-to-android-mapping.md`: verified upstream-to-Kuber mapping.

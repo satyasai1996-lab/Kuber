@@ -35,3 +35,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.post("/orders/paper", json=order).status_code, 200)
         live = {**order, "idempotency_key": "api-live-123", "confirmed": False}
         self.assertEqual(self.client.post("/orders/live/confirm", json=live).status_code, 409)
+
+    def test_creates_alert_with_supported_kind(self) -> None:
+        response = self.client.post("/alerts", json={"symbol": "NIFTY", "kind": "GEX_REGIME", "condition": "NEGATIVE"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["kind"], "GEX_REGIME")

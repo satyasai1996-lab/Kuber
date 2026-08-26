@@ -11,11 +11,13 @@ from pydantic import BaseModel, Field
 
 from kuber.agents.base import AgentContext
 from kuber.agents.coordinator import AnalysisCoordinator
+from kuber.alerts.service import AlertStore
+from kuber.backtest.engine import BacktestConfig, BotSignalBacktester
 from kuber.brokers.mock import MockBroker
 from kuber.execution.service import BrokerRegistry, ExecutionService
 from kuber.market.intelligence import SharedMarketIntelligence
 from kuber.market.normalizer import MarketDataNormalizer
-from kuber.models import OrderRequest, OrderSide, TradingMode
+from kuber.models import Bias, BotSignal, Candle, OrderRequest, OrderSide, TradingMode
 
 
 def _json(value: Any) -> Any:
@@ -74,6 +76,37 @@ class LiveOrderPayload(OrderPayload):
     confirmed: bool
 
 
+class CandlePayload(BaseModel):
+    timestamp: datetime
+    open: float = Field(gt=0)
+    high: float = Field(gt=0)
+    low: float = Field(gt=0)
+    close: float = Field(gt=0)
+    volume: int = Field(default=0, ge=0)
+
+
+class BotSignalPayload(BaseModel):
+    timestamp: datetime
+    bias: Bias
+    confidence: int = Field(ge=0, le=100)
+    risk_approved: bool
+    rationale: list[str] = Field(default_factory=list)
+
+
+class BacktestPayload(BaseModel):
+    candles: list[CandlePayload] = Field(min_length=2)
+    signals: list[BotSignalPayload]
+    initial_capital: float = Field(default=200_000, gt=0)
+    allocation_percent: float = Field(default=25, gt=0, le=100)
+    transaction_cost_bps: float = Field(default=10, ge=0)
+
+
+class AlertPayload(BaseModel):
+    symbol: str
+    kind: str
+    condition: str
+
+
 class KuberServices:
     def __init__(self) -> None:
         self.normalizer = MarketDataNormalizer()
@@ -82,6 +115,7 @@ class KuberServices:
         self.registry = BrokerRegistry()
         self.execution = ExecutionService(self.registry)
         self.analyses: dict[str, Any] = {}
+        self.alerts = AlertStore()
 
     def prepare(self, request: AnalysisRequest):
         quote = self.normalizer.normalize_quote(request.symbol, request.quote.model_dump(), request.quote.source)
@@ -130,6 +164,44 @@ def create_app(services: KuberServices | None = None) -> FastAPI:
         if intelligence is None:
             raise HTTPException(status_code=404, detail="quote not found")
         return _json(asdict(intelligence.quote))
+
+    @app.get("/options/chain/{symbol}")
+    def option_chain(symbol: str) -> Any:
+        intelligence = app.state.services.intelligence.get(symbol)
+        if intelligence is None:
+            raise HTTPException(status_code=404, detail="option chain not found")
+        return _json([asdict(contract) for contract in intelligence.option_chain])
+
+    @app.get("/analysis/iv-smile/{symbol}")
+    def iv_smile(symbol: str) -> Any:
+        intelligence = app.state.services.intelligence.get(symbol)
+        if intelligence is None:
+            raise HTTPException(status_code=404, detail="option chain not found")
+        return _json({"symbol": symbol.upper(), "points": [
+            {"strike": contract.strike, "option_type": contract.option_type, "implied_volatility": contract.implied_volatility}
+            for contract in intelligence.option_chain
+        ]})
+
+    @app.post("/backtest")
+    def backtest(payload: BacktestPayload) -> Any:
+        candles = tuple(Candle(**item.model_dump()) for item in payload.candles)
+        signals = tuple(BotSignal(item.timestamp, item.bias, item.confidence, item.risk_approved, tuple(item.rationale)) for item in payload.signals)
+        try:
+            result = BotSignalBacktester(BacktestConfig(payload.initial_capital, payload.allocation_percent, payload.transaction_cost_bps)).run(candles, signals)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return _json(asdict(result))
+
+    @app.get("/alerts")
+    def list_alerts() -> Any:
+        return _json([asdict(rule) for rule in app.state.services.alerts.list()])
+
+    @app.post("/alerts")
+    def create_alert(payload: AlertPayload) -> Any:
+        try:
+            return _json(asdict(app.state.services.alerts.create(payload.symbol, payload.kind, payload.condition)))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.get("/brokers")
     @app.get("/broker/status")

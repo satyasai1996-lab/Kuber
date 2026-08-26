@@ -24,6 +24,7 @@ provider payloads -> MarketDataNormalizer -> SharedMarketIntelligence
 - A stale GEX snapshot, missing direction, or invalid stop blocks execution.
 - The `RiskEngine` owns position sizing and can reduce size in a negative-gamma regime.
 - `MockBroker` permits paper orders only; production broker adapters must implement `BaseBroker` and opt in to live execution.
+- Angel One, Zerodha, and Fyers adapters share `ControlledBroker`; backend deployment injects their authenticated gateway implementation and must explicitly enable each live route after controlled testing.
 - A live order cannot be submitted without a separate `confirmed=true` request, an idempotency key, an enabled broker, and an audit event.
 
 ## Extension points

@@ -202,3 +202,51 @@ class AuditEvent:
     timestamp: datetime
     request_id: str
     result: str
+
+
+@dataclass(frozen=True)
+class Candle:
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int = 0
+
+    def __post_init__(self) -> None:
+        if min(self.open, self.high, self.low, self.close) <= 0:
+            raise ValueError("OHLC prices must be positive")
+        if self.low > min(self.open, self.close) or self.high < max(self.open, self.close):
+            raise ValueError("candle high/low does not contain open and close")
+
+
+@dataclass(frozen=True)
+class BotSignal:
+    timestamp: datetime
+    bias: Bias
+    confidence: int
+    risk_approved: bool
+    rationale: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BacktestTrade:
+    entry_timestamp: datetime
+    exit_timestamp: datetime
+    side: OrderSide
+    quantity: int
+    entry_price: float
+    exit_price: float
+    net_pnl: float
+    rationale: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BacktestResult:
+    initial_capital: float
+    final_equity: float
+    total_return_percent: float
+    max_drawdown_percent: float
+    win_rate_percent: float
+    trades: tuple[BacktestTrade, ...]
+    rejected_signals: int
