@@ -19,7 +19,7 @@ class BrokerConnector(Protocol):
 
 
 class BrokerConnectionService:
-    SUPPORTED = {"angel_one", "zerodha", "fyers"}
+    SUPPORTED = {"angel_one", "zerodha", "zerodha_sandbox", "fyers"}
 
     def __init__(self, connectors: dict[str, BrokerConnector] | None = None) -> None:
         self._connectors = connectors or {}
@@ -39,3 +39,12 @@ class BrokerConnectionService:
             # The API does not retain this request payload; deployment connectors must
             # persist encrypted server-side references only, never plain credentials.
             credentials.clear()
+
+    def login_url(self, broker: str) -> str:
+        """Return a provider login URL only when a connector explicitly exposes one."""
+        normalized = broker.lower().replace(" ", "_")
+        connector = self._connectors.get(normalized)
+        login_url = getattr(connector, "login_url", None)
+        if not callable(login_url):
+            raise RuntimeError(f"{normalized} does not expose a configured login flow")
+        return str(login_url())

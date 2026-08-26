@@ -16,6 +16,7 @@ from kuber.alerts.service import AlertStore
 from kuber.backtest.engine import BacktestConfig, BotSignalBacktester
 from kuber.brokers.mock import MockBroker
 from kuber.brokers.connection import BrokerConnectionService
+from kuber.brokers.kite_sandbox import KiteSandboxConnector
 from kuber.config import KuberSettings
 from kuber.execution.service import BrokerRegistry, ExecutionService
 from kuber.market.intelligence import SharedMarketIntelligence
@@ -125,7 +126,9 @@ class KuberServices:
         self.analyses: dict[str, Any] = {}
         self.latest_analysis_by_symbol: dict[str, Any] = {}
         self.alerts = AlertStore()
-        self.broker_connections = BrokerConnectionService()
+        # The only preconfigured external connector is Zerodha's official demo
+        # sandbox. It is isolated from production accounts and live execution.
+        self.broker_connections = BrokerConnectionService({"zerodha_sandbox": KiteSandboxConnector()})
 
     def prepare(self, request: AnalysisRequest):
         quote = self.normalizer.normalize_quote(request.symbol, request.quote.model_dump(), request.quote.source)
@@ -252,6 +255,14 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
             raise HTTPException(status_code=422, detail=str(error)) from error
         except RuntimeError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
+
+    @app.get("/brokers/zerodha/sandbox/login-url")
+    def zerodha_sandbox_login_url() -> dict[str, str]:
+        return {
+            "broker": "zerodha_sandbox",
+            "environment": "demo_only",
+            "login_url": app.state.services.broker_connections.login_url("zerodha_sandbox"),
+        }
 
     @app.get("/portfolio")
     def portfolio() -> Any:
