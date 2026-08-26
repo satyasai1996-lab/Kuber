@@ -1,7 +1,7 @@
 # Kuber Server-Authoritative Architecture
 
-Status: **Architecture source of truth**  
-Decision date: 2026-08-26  
+Status: **Architecture source of truth**
+Decision date: 2026-08-26
 Owner: System Architect Bot
 
 > **Supersession notice:** This document supersedes
@@ -650,4 +650,3 @@ and security validation.
   complete.
 - Live remains disabled until broker-specific controlled validation and
   explicit user approval.
-

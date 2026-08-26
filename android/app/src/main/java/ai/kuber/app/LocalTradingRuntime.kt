@@ -31,6 +31,17 @@ data class LocalKuberState(
     val analysis: AnalysisResult? = null,
     val status: String = "Use Broker to connect Zerodha, or load the clearly labelled local paper demo.",
     val liveData: Boolean = false,
+    val selectedInstrument: TradeInstrument = TradeInstrument.NIFTY,
+)
+
+data class LocalBacktestResult(
+    val instrument: TradeInstrument,
+    val candles: Int,
+    val trades: Int,
+    val wins: Int,
+    val netReturnPercent: Double,
+    val maxDrawdownPercent: Double,
+    val status: String,
 )
 
 /** In-process Kuber service layer. It replaces the previous FastAPI/Retrofit path. */
@@ -53,18 +64,28 @@ class LocalTradingRuntime {
     fun logout() { zerodha.logout(); state = state.copy(connection = zerodha.connection, status = "Zerodha session cleared from memory.") }
     fun setStatus(message: String) { state = state.copy(status = message) }
 
-    fun loadPaperDemo() {
-        val now = System.currentTimeMillis()
-        val quote = Quote("NIFTY", 22_000.0, now, "local_paper_fixture", volume = 1_500_000, vwap = 21_965.0)
-        val chain = listOf(
-            option(21_800.0, OptionType.CE, 100_000, .141, .009, 235.0, now), option(21_900.0, OptionType.CE, 120_000, .138, .015, 168.0, now),
-            option(22_000.0, OptionType.CE, 165_000, .135, .022, 111.0, now), option(22_000.0, OptionType.PE, 142_000, .142, .022, 105.0, now),
-            option(22_100.0, OptionType.PE, 180_000, .149, .016, 160.0, now), option(22_200.0, OptionType.PE, 145_000, .156, .010, 230.0, now),
-        )
-        publish(quote, chain, isLive = false, status = "Local paper demo loaded. Fixture data is not live market data.")
+    fun selectInstrument(instrument: TradeInstrument) {
+        state = state.copy(selectedInstrument = instrument, market = null, options = null, analysis = null,
+            liveData = false, status = "${instrument.name} selected. Load its local paper fixture or refresh an authenticated broker snapshot.")
     }
 
-    fun refreshZerodha(symbol: String = "NIFTY") {
+    fun loadPaperDemo() {
+        val instrument = state.selectedInstrument
+        val now = System.currentTimeMillis()
+        val quote = Quote(instrument.symbol, instrument.demoSpot, now, "local_paper_fixture", volume = 1_500_000, vwap = instrument.demoSpot * .998)
+        val chain = listOf(-4, -2, 0, 2, 4).flatMap { offset ->
+            val strike = instrument.demoSpot + offset * instrument.strikeStep
+            val distance = kotlin.math.abs(offset)
+            listOf(
+                option(instrument, strike, OptionType.CE, 105_000L + (4 - distance) * 18_000L, .135 + distance * .004, .009 + (4 - distance) * .003, 105.0 + distance * 44, now),
+                option(instrument, strike, OptionType.PE, 112_000L + (4 - distance) * 16_000L, .142 + distance * .004, .010 + (4 - distance) * .003, 101.0 + distance * 42, now),
+            )
+        }
+        publish(quote, chain, isLive = false, status = "${instrument.name} local paper fixture loaded. Values are deterministic demo data, not live market data.")
+    }
+
+    fun refreshZerodha(symbol: String = state.selectedInstrument.name) {
+        require(state.selectedInstrument.directZerodhaSupported) { "${state.selectedInstrument.symbol} requires the authenticated backend market adapter; direct refresh is unavailable." }
         check(zerodha.connection.state.name == "CONNECTED") { "Connect Zerodha first" }
         val quote = zerodha.getQuote(symbol)
         val chain = zerodha.getOptionChain(symbol)
@@ -99,13 +120,37 @@ class LocalTradingRuntime {
     fun paperPortfolio() = paper.snapshot()
     fun auditEvents() = execution.auditEvents()
 
+    /** A deterministic bar-by-bar moving-average simulation. Each signal uses only closed bars available at that index. */
+    fun runPaperBacktest(): LocalBacktestResult {
+        val instrument = state.selectedInstrument
+        val base = instrument.demoSpot
+        val changes = listOf(-.004, -.002, .003, .006, .004, -.003, .005, .008, -.006, -.005, .002, .006, .004, -.007, .003, .006, .002, -.004, .005, .003)
+        val prices = changes.runningFold(base) { price, change -> price * (1 + change) }
+        var cash = 100_000.0; var peak = cash; var maxDrawdown = 0.0; var trades = 0; var wins = 0; var entry: Double? = null
+        for (index in 5 until prices.size) {
+            val shortAverage = prices.subList(index - 3, index).average()
+            val longAverage = prices.subList(index - 5, index).average()
+            val close = prices[index]
+            if (entry == null && shortAverage > longAverage) { entry = close; trades++ }
+            else if (entry != null && (shortAverage < longAverage || index == prices.lastIndex)) {
+                val result = (close - entry) / entry
+                cash *= (1 + result); if (result > 0) wins++; entry = null
+            }
+            peak = maxOf(peak, cash); maxDrawdown = maxOf(maxDrawdown, (peak - cash) / peak)
+        }
+        val result = LocalBacktestResult(instrument, prices.size, trades, wins, (cash / 100_000.0 - 1) * 100, maxDrawdown * 100,
+            "Completed against local historical fixture. No future candle is read when deciding an entry or exit.")
+        state = state.copy(status = "${instrument.name} no-lookahead paper backtest completed: ${"%.2f".format(result.netReturnPercent)}%.")
+        return result
+    }
+
     private fun liveRequest(profile: RiskProfile, exchange: String, tradingSymbol: String, quantity: Int, requestId: String): Triple<OrderRequest, MarketIntelligence, ai.kuber.core.model.analysis.RiskDecision> {
         require(state.liveData) { "Refresh a direct Zerodha snapshot before a live order" }
         val market = requireNotNull(state.market) { "No market snapshot" }
         val analysis = requireNotNull(state.analysis) { "No bot analysis" }
         val plan = analysis.tradePlans.first { it.profile == profile }
         require(plan.quantity > 0 && plan.direction.name in setOf("BULLISH", "BEARISH")) { "Final Risk Manager did not approve this plan" }
-        require(exchange in setOf("NFO", "NSE", "BSE")) { "Unsupported exchange" }
+        require(exchange in setOf("NFO", "NSE", "BSE", "BFO", "MCX")) { "Unsupported exchange" }
         require(tradingSymbol.trim().matches(Regex("[A-Za-z0-9]+"))) { "Enter a valid broker trading symbol" }
         require(requestId.length >= 8) { "Invalid order review ID" }
         val request = OrderRequest(BrokerName.ZERODHA, TradingMode.LIVE, exchange, tradingSymbol.trim().uppercase(), if (plan.direction.name == "BULLISH") OrderSide.BUY else OrderSide.SELL, quantity, OrderType.MARKET, "MIS", idempotencyKey = requestId, snapshotId = market.snapshotId, inputVersion = market.inputVersion)
@@ -117,7 +162,8 @@ class LocalTradingRuntime {
         val options = analytics.calculate(market)
         val analysis = orchestrator.analyze(AnalysisContext(market, options, fundamentalScore = if (isLive) null else 15.0, newsMacroScore = if (isLive) null else 8.0, sentimentScore = if (isLive) null else 10.0, sectorRotationScore = if (isLive) null else 6.0))
         paper.latestQuote = market.quote
-        state = LocalKuberState(zerodha.connection, market, options, analysis, status, isLive)
+        state = LocalKuberState(zerodha.connection, market, options, analysis, status, isLive, state.selectedInstrument)
     }
-    private fun option(strike: Double, type: OptionType, oi: Long, iv: Double, gamma: Double, price: Double, now: Long) = OptionContract("NIFTY", strike, "2026-08-27", type, oi, iv, gamma, price, 25, now, "local_paper_fixture", volume = 50_000)
+    private fun option(instrument: TradeInstrument, strike: Double, type: OptionType, oi: Long, iv: Double, gamma: Double, price: Double, now: Long) =
+        OptionContract(instrument.symbol, strike, "2026-08-27", type, oi, iv, gamma, price, instrument.lotSize, now, "local_paper_fixture", volume = 50_000)
 }

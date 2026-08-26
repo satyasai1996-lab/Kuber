@@ -1,8 +1,8 @@
 # Live Market / Broker REUSE–MODIFY–NEW Audit
 
-Audit date: 2026-08-26  
+Audit date: 2026-08-26
 Reference checkout: `work/reference-india-trade-cli` at
-`e62ac86d4a182f6df0f785c4620a527d753b4517`  
+`e62ac86d4a182f6df0f785c4620a527d753b4517`
 Kuber checkout inspected: `work/publish` at
 `6bdbbf79a926c59eb9b12144da75c3bbd51acba7` plus the uncommitted Android UI
 work listed in the final section.

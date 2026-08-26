@@ -1,8 +1,8 @@
 # Kuber Server Options / GEX Evidence Audit
 
-Audit date: 2026-08-26  
+Audit date: 2026-08-26
 Reference: `hopit-ai/india-trade-cli` commit
-`e62ac86d4a182f6df0f785c4620a527d753b4517`  
+`e62ac86d4a182f6df0f785c4620a527d753b4517`
 Kuber checkout inspected: `work/publish`
 
 This is a read-only implementation audit. It does not establish a real broker

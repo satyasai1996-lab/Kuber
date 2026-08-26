@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:allowBackup="false" android:label="Kuber" android:theme="@style/Theme.Kuber">
+    <application android:allowBackup="false" android:icon="@drawable/kuber_launcher_icon" android:label="Kuber" android:theme="@style/Theme.Kuber">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
