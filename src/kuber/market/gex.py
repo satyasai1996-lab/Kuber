@@ -65,11 +65,11 @@ class GexCalculator:
 
     @staticmethod
     def _find_flip(strikes: tuple[GexStrike, ...]) -> float | None:
-        """Linearly interpolate the first net-GEX sign crossing."""
+        """Match upstream: first positive-to-nonpositive crossing only."""
         for previous, current in zip(strikes, strikes[1:]):
-            if previous.net_gex == 0:
-                return previous.strike
-            if previous.net_gex * current.net_gex < 0:
-                ratio = abs(previous.net_gex) / (abs(previous.net_gex) + abs(current.net_gex))
-                return round(previous.strike + ratio * (current.strike - previous.strike), 2)
+            if previous.net_gex > 0 and current.net_gex <= 0:
+                if previous.net_gex != current.net_gex:
+                    ratio = previous.net_gex / (previous.net_gex - current.net_gex)
+                    return previous.strike + ratio * (current.strike - previous.strike)
+                return current.strike
         return None

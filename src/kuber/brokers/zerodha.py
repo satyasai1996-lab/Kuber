@@ -30,6 +30,7 @@ class KiteClient(Protocol):
 
 
 KiteClientFactory = Callable[[str], KiteClient]
+_SUPPORTED_INSTRUMENT_EXCHANGES = ("NSE", "NFO", "BSE", "BFO", "MCX")
 
 
 def _default_client_factory(api_key: str) -> KiteClient:
@@ -148,7 +149,16 @@ class ZerodhaOAuthConnector:
         return self._broker
 
     def instrument_master(self) -> tuple[dict[str, Any], ...]:
-        """Return the current provider master only after backend OAuth completes."""
+        """Return one snapshot containing only Kuber's supported trading exchanges.
+
+        Kite's unfiltered instrument dump can also contain unrelated exchanges
+        such as CDS or BCD. Fetch each supported exchange explicitly so the
+        strict catalogue validator can remain all-or-nothing without rejecting
+        an otherwise valid provider snapshot for out-of-scope rows.
+        """
         if self._client is None:
             raise RuntimeError("Zerodha has not completed OAuth on this backend")
-        return tuple(self._client.instruments())
+        rows: list[dict[str, Any]] = []
+        for exchange in _SUPPORTED_INSTRUMENT_EXCHANGES:
+            rows.extend(self._client.instruments(exchange))
+        return tuple(rows)

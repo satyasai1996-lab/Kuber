@@ -2,9 +2,31 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import isfinite
 from typing import Any, Iterable
 
 from kuber.models import OptionContract, Quote, utc_now
+
+
+def _iv_decimal(item: dict[str, Any]) -> float:
+    """Normalize legacy percentage payloads while keeping the core decimal-only.
+
+    Values above 5 cannot be valid decimal volatility under Kuber's supported
+    range, so treating them as percentages is unambiguous. New producers should
+    send ``implied_volatility_decimal`` or a decimal ``implied_volatility``.
+    """
+    if item.get("implied_volatility_decimal") is not None:
+        value = float(item["implied_volatility_decimal"])
+    else:
+        raw = item.get("implied_volatility", item.get("iv"))
+        if raw is None:
+            raise ValueError("option payload must include implied volatility")
+        value = float(raw)
+        if value > 5.0:
+            value /= 100.0
+    if not isfinite(value) or not 0 < value <= 5.0:
+        raise ValueError("implied volatility must normalize to a decimal in (0, 5]")
+    return value
 
 
 class MarketDataNormalizer:
@@ -39,7 +61,7 @@ class MarketDataNormalizer:
                     expiry=str(item["expiry"]),
                     option_type=str(item.get("option_type", item.get("type", ""))).upper(),
                     open_interest=int(item.get("open_interest", item.get("oi", 0))),
-                    implied_volatility=float(item.get("implied_volatility", item.get("iv", 0))),
+                    implied_volatility=_iv_decimal(item),
                     gamma=float(item["gamma"]),
                     last_price=float(item.get("last_price", item.get("ltp", 0))),
                     lot_size=int(item["lot_size"]),

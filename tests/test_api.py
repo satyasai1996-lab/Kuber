@@ -88,8 +88,8 @@ class ApiTests(unittest.TestCase):
         services = KuberServices()
         quote = Quote("NIFTY", 22_000, datetime.now(timezone.utc), "zerodha")
         options = (
-            OptionContract("NIFTY", 21_900, "2026-08-27", "CE", 100, 14, 0.02, 130, 25),
-            OptionContract("NIFTY", 22_100, "2026-08-27", "PE", 100, 15, 0.02, 125, 25),
+            OptionContract("NIFTY", 21_900, "2026-08-27", "CE", 100, 0.14, 0.02, 130, 25),
+            OptionContract("NIFTY", 22_100, "2026-08-27", "PE", 100, 0.15, 0.02, 125, 25),
         )
         services.registry.register(MockBroker(name="zerodha", quote=quote, option_chain=options))
         client = TestClient(create_app(services=services))

@@ -17,6 +17,12 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        val kuberApiBaseUrl = providers.gradleProperty("KUBER_API_BASE_URL").orElse("").get()
+        buildConfigField("String", "KUBER_API_BASE_URL", "\"${kuberApiBaseUrl.replace("\"", "\\\"")}\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {
@@ -46,6 +52,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")
 }

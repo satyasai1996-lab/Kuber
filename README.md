@@ -27,11 +27,29 @@ Requires Python 3.11+.
 ```bash
 python -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
+PYTHONPATH=src .venv/bin/python -m pytest -q
 PYTHONPATH=src .venv/bin/uvicorn kuber.api.app:app --reload
 ```
 
 On Windows, use `.venv\\Scripts\\python.exe` instead.
+
+## Android instrument search
+
+The Android app searches the backend provider catalogue only when a public API
+base URL is supplied at build time:
+
+```bash
+gradle -p android :app:assembleDebug \
+  -PKUBER_API_BASE_URL=https://kuber.example.com
+```
+
+This property is a public URL, never a broker key, broker token, API secret or
+user password. When it is absent, the app labels its small bundled list as
+shortcuts with no price data. A real Zerodha catalogue becomes ready only after
+backend OAuth and the atomic `POST /api/v1/admin/instruments/sync/zerodha`
+operation succeed. The production mobile-session login flow is still a release
+gate; the global `KUBER_API_TOKEN` is development-only and is not embedded in
+the APK.
 
 ## Project layout
 

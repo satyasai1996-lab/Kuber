@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from queue import Empty
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -23,7 +24,7 @@ from kuber.brokers.kite_sandbox import KiteSandboxConnector
 from kuber.brokers.zerodha import ZerodhaOAuthConnector
 from kuber.config import KuberSettings
 from kuber.execution.service import BrokerRegistry, ExecutionService
-from kuber.instruments import InstrumentCatalog, normalize_zerodha_instruments
+from kuber.instruments import InstrumentCatalog, InstrumentCatalogSynchronizer
 from kuber.market.intelligence import SharedMarketIntelligence
 from kuber.market.normalizer import MarketDataNormalizer
 from kuber.market.streaming import MarketStreamBus
@@ -40,6 +41,16 @@ def _json(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_json(item) for item in value]
     return value
+
+
+def _api_envelope(*, data: Any = None, error: dict[str, Any] | None = None) -> dict[str, Any]:
+    return _json({
+        "schema_version": "1.0",
+        "request_id": uuid4().hex,
+        "server_time": datetime.now(timezone.utc).isoformat(),
+        "data": data,
+        "error": error,
+    })
 
 
 class QuotePayload(BaseModel):
@@ -144,6 +155,7 @@ class KuberServices:
         self.alerts = AlertStore()
         self.stream = MarketStreamBus()
         self.instruments = InstrumentCatalog()
+        self.instrument_sync = InstrumentCatalogSynchronizer(self.instruments)
         # Sandbox is intentionally not the default path. A real Kite connection
         # is available only when a backend deployment provides its own app key
         # and secret; none of those values exist in Android or this source tree.
@@ -233,16 +245,9 @@ class KuberServices:
     def sync_instrument_catalog(self, broker: str) -> dict[str, Any]:
         normalized = broker.lower().replace(" ", "_")
         connector = self.broker_connections.connector(normalized)
-        loader = getattr(connector, "instrument_master", None)
-        if not callable(loader):
-            raise RuntimeError(f"{normalized} does not expose an instrument master")
-        rows = loader()
         if normalized == "zerodha":
-            items = normalize_zerodha_instruments(rows)
-        else:
-            raise RuntimeError(f"{normalized} instrument normalization is not implemented")
-        version = self.instruments.replace(items)
-        return {"provider": normalized, "catalog_version": version, "count": len(items)}
+            return _json(asdict(self.instrument_sync.sync_zerodha(connector)))
+        raise RuntimeError(f"{normalized} instrument normalization is not implemented")
 
 
 def create_app(services: KuberServices | None = None, settings: KuberSettings | None = None) -> FastAPI:
@@ -257,6 +262,16 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
         token = app.state.settings.api_token
         if token and request.url.path not in {"/health", "/docs", "/openapi.json"}:
             if request.headers.get("Authorization") != f"Bearer {token}":
+                if request.url.path.startswith("/api/v1/"):
+                    return JSONResponse(
+                        _api_envelope(error={
+                            "code": "unauthorized",
+                            "message": "A valid Kuber session is required.",
+                            "retryable": False,
+                            "details": None,
+                        }),
+                        status_code=401,
+                    )
                 return JSONResponse({"detail": "unauthorized"}, status_code=401)
         return await call_next(request)
 
@@ -283,7 +298,27 @@ def create_app(services: KuberServices | None = None, settings: KuberSettings | 
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
-        return _json(asdict(result))
+        if not result.ready:
+            return JSONResponse(
+                _api_envelope(error={
+                    "code": "catalog_unavailable",
+                    "message": "Instrument catalog is not ready; connect and synchronize a backend market provider.",
+                    "retryable": True,
+                    "details": None,
+                }),
+                status_code=503,
+            )
+        return _api_envelope(data={
+            "items": [item.to_public_dict() for item in result.items],
+            "next_cursor": None,
+            "catalog_version": result.catalog_version,
+            "as_of": result.as_of,
+        })
+
+    @app.get("/api/v1/instruments/status")
+    def instrument_catalog_status() -> Any:
+        """Expose catalogue readiness and freshness without returning credentials."""
+        return _api_envelope(data=asdict(app.state.services.instruments.status()))
 
     @app.post("/api/v1/admin/instruments/sync/{broker}")
     def sync_instruments(broker: str) -> Any:

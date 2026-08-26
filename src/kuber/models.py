@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from math import isfinite
 from typing import Any
 from uuid import uuid4
 
@@ -56,6 +57,8 @@ class Quote:
 
 @dataclass(frozen=True)
 class OptionContract:
+    """One normalized option row; implied volatility is decimal (0.20 = 20%)."""
+
     underlying: str
     strike: float
     expiry: str
@@ -70,8 +73,12 @@ class OptionContract:
     def __post_init__(self) -> None:
         if self.option_type not in {"CE", "PE"}:
             raise ValueError("option_type must be CE or PE")
-        if self.strike <= 0 or self.lot_size <= 0:
+        if not isfinite(self.strike) or self.strike <= 0 or self.lot_size <= 0:
             raise ValueError("strike and lot_size must be positive")
+        if not isfinite(self.implied_volatility) or not 0 < self.implied_volatility <= 5:
+            raise ValueError("implied_volatility must be a decimal in (0, 5]")
+        if not isfinite(self.gamma) or not isfinite(self.last_price):
+            raise ValueError("option metrics must be finite")
         if self.open_interest < 0 or self.gamma < 0 or self.last_price < 0:
             raise ValueError("option metrics cannot be negative")
 

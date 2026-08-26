@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from math import erf, exp, log, pi, sqrt
+from math import erf, exp, isfinite, log, pi, sqrt
 from typing import Any, Callable, Iterable, Protocol
 
 from kuber.models import OptionContract
@@ -33,11 +33,16 @@ def _bs_price(spot: float, strike: float, years: float, volatility: float, optio
 
 
 def implied_volatility(spot: float, strike: float, years: float, price: float, option_type: str, rate: float = 0.065) -> float:
-    """Solve Black-Scholes IV by bisection; return zero for unusable prices."""
-    if min(spot, strike, years, price) <= 0:
+    """Solve decimal Black-Scholes IV; return zero for invalid/boundary prices."""
+    values = (spot, strike, years, price, rate)
+    if not all(isfinite(value) for value in values) or min(spot, strike, years, price) <= 0:
         return 0.0
-    intrinsic = max(spot - strike, 0.0) if option_type == "CE" else max(strike * exp(-rate * years) - spot, 0.0)
-    if price <= intrinsic:
+    if option_type not in {"CE", "PE"}:
+        return 0.0
+    discounted_strike = strike * exp(-rate * years)
+    lower_bound = max(spot - discounted_strike, 0.0) if option_type == "CE" else max(discounted_strike - spot, 0.0)
+    upper_bound = spot if option_type == "CE" else discounted_strike
+    if price <= lower_bound or price > upper_bound:
         return 0.0
     low, high = 0.0001, 5.0
     if _bs_price(spot, strike, years, high, option_type, rate) < price:
@@ -132,13 +137,15 @@ class ZerodhaOptionChainBuilder:
             strike = float(item["strike"])
             iv = implied_volatility(spot, strike, years, last_price, option_type, self.config.risk_free_rate)
             gamma = black_scholes_gamma(spot, strike, years, iv, self.config.risk_free_rate)
+            if iv <= 0 or gamma <= 0:
+                continue
             contracts.append(OptionContract(
                 underlying=underlying,
                 strike=strike,
                 expiry=expiry.isoformat(),
                 option_type=option_type,
                 open_interest=int(quote.get("oi", 0) or 0),
-                implied_volatility=round(iv * 100, 4),
+                implied_volatility=iv,
                 gamma=gamma,
                 last_price=last_price,
                 lot_size=int(item.get("lot_size", 1)),

@@ -1,5 +1,9 @@
 package ai.kuber.app
 
+import ai.kuber.app.data.instruments.InstrumentSearchQuery
+import ai.kuber.app.data.instruments.InstrumentSearchRepository
+import ai.kuber.app.data.instruments.InstrumentSearchState
+import ai.kuber.app.data.instruments.OkHttpInstrumentSearchClient
 import ai.kuber.core.model.analysis.Bias
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +24,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,9 +34,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 private enum class KuberScreen(val label: String) {
     HOME("Home"), ANALYSIS("AI bots"), GAMMA("GEX"), OPTIONS("Options"),
@@ -77,7 +84,31 @@ private fun HomeScreen(runtime: LocalTradingRuntime, state: LocalKuberState, syn
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
-    val searchResults = InstrumentCatalog.search(searchQuery)
+    var remoteSearchState by remember { mutableStateOf<InstrumentSearchState>(InstrumentSearchState.Idle) }
+    val apiSearchRepository = remember {
+        BuildConfig.KUBER_API_BASE_URL.trim().takeIf { it.isNotEmpty() }?.toHttpUrlOrNull()?.let { baseUrl ->
+            InstrumentSearchRepository(OkHttpInstrumentSearchClient(baseUrl))
+        }
+    }
+    val bundledResults = if (searchQuery.isBlank() || apiSearchRepository == null) InstrumentCatalog.search(searchQuery) else emptyList()
+    LaunchedEffect(searchQuery, apiSearchRepository) {
+        val query = searchQuery.trim()
+        if (query.isEmpty()) {
+            remoteSearchState = InstrumentSearchState.Idle
+        } else if (apiSearchRepository == null) {
+            remoteSearchState = InstrumentSearchState.Error(
+                InstrumentSearchQuery(query),
+                code = "backend_not_configured",
+                message = "Live instrument catalogue is not configured in this build.",
+                retryable = false,
+            )
+        } else {
+            delay(300)
+            val request = InstrumentSearchQuery(query)
+            remoteSearchState = InstrumentSearchState.Loading(request)
+            remoteSearchState = apiSearchRepository.search(request)
+        }
+    }
     LazyColumn(Modifier.padding(16.dp)) {
         item {
         Text("Kuber trading desk", style = MaterialTheme.typography.headlineSmall)
@@ -92,15 +123,34 @@ private fun HomeScreen(runtime: LocalTradingRuntime, state: LocalKuberState, syn
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Text(if (searchQuery.isBlank()) "Popular instruments" else "${searchResults.size} matching instruments", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
-            searchResults.take(8).forEach { instrument ->
+            val remote = remoteSearchState
+            val resultCount = if (remote is InstrumentSearchState.Results) remote.instruments.size else bundledResults.size
+            Text(if (searchQuery.isBlank()) "Popular instrument shortcuts" else "$resultCount matching instruments", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
+            if (searchQuery.isNotBlank() && remote is InstrumentSearchState.Loading) Text("Searching verified provider catalogue…")
+            if (searchQuery.isNotBlank() && remote is InstrumentSearchState.Error) Text(remote.message, style = MaterialTheme.typography.bodySmall)
+            if (remote is InstrumentSearchState.Results) remote.instruments.take(8).forEach { instrument ->
+                AssistChip(
+                    onClick = {
+                        val underlying = instrument.underlying ?: instrument.tradingsymbol
+                        val shortcut = TradeInstrument.entries.firstOrNull { it.symbol == underlying.uppercase() }
+                        if (shortcut != null) runtime.selectInstrument(shortcut)
+                        runtime.setStatus("Selected ${instrument.instrument_id} · ${instrument.exchange}/${instrument.segment}. Waiting for a verified quote snapshot.")
+                        searchQuery = instrument.tradingsymbol
+                        sync()
+                    },
+                    label = { Text("${instrument.display_name} · ${instrument.exchange}/${instrument.segment}") },
+                    modifier = Modifier.padding(end = 6.dp),
+                )
+            }
+            if (remote is InstrumentSearchState.Empty && searchQuery.isNotBlank()) Text("No verified instruments match this search.")
+            bundledResults.take(8).forEach { instrument ->
                 AssistChip(
                     onClick = { runtime.selectInstrument(instrument); searchQuery = instrument.symbol; sync() },
                     label = { Text(if (state.selectedInstrument == instrument) "✓ ${instrument.displayName} · ${instrument.derivativesExchange}" else "${instrument.displayName} · ${instrument.derivativesExchange}") },
                     modifier = Modifier.padding(end = 6.dp),
                 )
             }
-            if (searchResults.isEmpty()) Text("No supported NSE, BSE or MCX instrument matches this search.")
+            if (apiSearchRepository == null) Text("Bundled shortcuts only · no price data. Configure KUBER_API_BASE_URL to search the provider catalogue.", style = MaterialTheme.typography.bodySmall)
             Text("Selected: ${state.selectedInstrument.symbol} · cash ${state.selectedInstrument.cashExchange} · derivatives ${state.selectedInstrument.derivativesExchange}", style = MaterialTheme.typography.bodySmall)
         } }
         item {

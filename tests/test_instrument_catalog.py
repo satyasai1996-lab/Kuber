@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kuber.api.app import KuberServices, create_app
+from kuber.config import KuberSettings
 from kuber.instruments import InstrumentCatalog, normalize_zerodha_instruments
 
 
@@ -22,9 +23,9 @@ def catalogue() -> InstrumentCatalog:
 
 
 def test_search_preserves_exchange_and_derivative_identity():
-    result = catalogue().search("SENSEX", exchanges={"BFO"})
+    result = catalogue().search("SENSEX", exchanges={"BSE"})
     assert len(result.items) == 1
-    assert result.items[0].instrument_id == "zerodha:202"
+    assert result.items[0].instrument_id == "kuber:bfo:sensex26aug80000ce"
     assert result.items[0].segment == "BFO-OPT"
     assert result.items[0].option_type == "CE"
 
@@ -52,9 +53,35 @@ def test_versioned_api_searches_nse_bfo_and_mcx():
     response = client.get("/api/v1/instruments/search", params={"q": "SENSEX", "exchanges": "BFO"})
     assert response.status_code == 200
     body = response.json()
-    assert len(body["catalog_version"]) == 64
-    assert body["items"][0]["instrument_id"] == "zerodha:202"
+    assert body["schema_version"] == "1.0"
+    assert len(body["data"]["catalog_version"]) == 64
+    item = body["data"]["items"][0]
+    assert item["instrument_id"] == "kuber:bfo:sensex26aug80000ce"
+    assert "provider" not in item
+    assert "provider_token" not in item
 
     mcx = client.get("/api/v1/instruments/search", params={"q": "CRUDE", "exchanges": "MCX", "types": "FUT"})
     assert mcx.status_code == 200
-    assert mcx.json()["items"][0]["exchange"] == "MCX"
+    assert mcx.json()["data"]["items"][0]["exchange"] == "MCX"
+
+
+def test_api_returns_structured_unavailable_error_before_provider_sync():
+    client = TestClient(create_app(services=KuberServices()))
+    response = client.get("/api/v1/instruments/search", params={"q": "NIFTY"})
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "catalog_unavailable"
+
+
+def test_versioned_search_returns_structured_authentication_error():
+    client = TestClient(create_app(settings=KuberSettings(api_token="test-token")))
+
+    response = client.get("/api/v1/instruments/search", params={"q": "NIFTY"})
+
+    assert response.status_code == 401
+    assert response.json()["schema_version"] == "1.0"
+    assert response.json()["error"] == {
+        "code": "unauthorized",
+        "message": "A valid Kuber session is required.",
+        "retryable": False,
+        "details": None,
+    }
